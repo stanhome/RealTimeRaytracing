@@ -13,6 +13,15 @@
     <Filter Include="Assets\Shaders">
       <UniqueIdentifier>{8b0cb0c9-e0d8-4107-91c8-11654fac88e7}</UniqueIdentifier>
     </Filter>
+    <Filter Include="framework">
+      <UniqueIdentifier>{861f6470-f09b-418f-8c0f-9a982179a822}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="framework\DXRHelper">
+      <UniqueIdentifier>{5be3062c-59c2-4e62-bd43-eec3745b68ba}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="framework\DXR">
+      <UniqueIdentifier>{3b7fe697-0dc1-45b9-b482-1046368af874}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
@@ -33,6 +42,42 @@
     <ClInclude Include="Win32Application.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="framework\DXRHelper\DXRHelper.h">
+      <Filter>framework\DXRHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\BottomLevelASGenerator.h">
+      <Filter>framework\DXRHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\RaytracingPipelineGenerator.h">
+      <Filter>framework\DXRHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\RootSignatureGenerator.h">
+      <Filter>framework\DXRHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\ShaderBindingTableGenerator.h">
+      <Filter>framework\DXRHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\TopLevelASGenerator.h">
+      <Filter>framework\DXRHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXR\d3d12.h">
+      <Filter>framework\DXR</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXR\d3d12_1.h">
+      <Filter>framework\DXR</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXR\d3d12video.h">
+      <Filter>framework\DXR</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXR\d3dx12.h">
+      <Filter>framework\DXR</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXR\dxcapi.h">
+      <Filter>framework\DXR</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DXR\dxcapi.use.h">
+      <Filter>framework\DXR</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -49,6 +94,21 @@
     </ClCompile>
     <ClCompile Include="Win32Application.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\BottomLevelASGenerator.cpp">
+      <Filter>framework\DXRHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\RaytracingPipelineGenerator.cpp">
+      <Filter>framework\DXRHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\RootSignatureGenerator.cpp">
+      <Filter>framework\DXRHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\ShaderBindingTableGenerator.cpp">
+      <Filter>framework\DXRHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\TopLevelASGenerator.cpp">
+      <Filter>framework\DXRHelper</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
