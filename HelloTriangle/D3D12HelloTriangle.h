@@ -69,4 +69,14 @@ private:
 	void LoadAssets();
 	void PopulateCommandList();
 	void WaitForPreviousFrame();
+
+//////////////////////////////////////////////////////////////////////////
+//
+// #DXR
+private:
+	bool _isRaster = true;
+	CComQIPtr<ID3D12DeviceRaytracingPrototype> _rtDevice;
+
+	virtual void OnKeyUp(UINT8 key);
+	void activateExperimentalFeatures();
 };

@@ -15,7 +15,8 @@ inline void ThrowIfFailed(HRESULT hr)
 {
 	if (FAILED(hr))
 	{
-		throw std::exception();
+		//throw std::exception();
+		OutputDebugStringA("some error!");
 	}
 }
 

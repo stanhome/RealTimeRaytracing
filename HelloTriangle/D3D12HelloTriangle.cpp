@@ -23,8 +23,19 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
 
 void D3D12HelloTriangle::OnInit()
 {
+	// not needed in My win 10 v1903, os version:18362.476
+	//activateExperimentalFeatures();
+
 	LoadPipeline();
 	LoadAssets();
+
+	// Cast the DX12 device to a raytracing prototype device to access RT-specific methods
+	ThrowIfFailed(m_device->QueryInterface(IID_PPV_ARGS(&_rtDevice)));
+
+	// Command lists are created in the recording state, but there is nothing
+	// to record yet. The main loop expects it to be closed, so close it now.
+	bool isClose = m_commandList->Close();
+	ThrowIfFailed(isClose);
 }
 
 // Load the rendering pipeline dependencies.
@@ -191,9 +202,6 @@ void D3D12HelloTriangle::LoadAssets()
 	// Create the command list.
 	ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
 
-	// Command lists are created in the recording state, but there is nothing
-	// to record yet. The main loop expects it to be closed, so close it now.
-	ThrowIfFailed(m_commandList->Close());
 
 	// Create the vertex buffer.
 	{
@@ -304,12 +312,23 @@ void D3D12HelloTriangle::PopulateCommandList()
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
 	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
+
 	// Record commands.
-	const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-	m_commandList->DrawInstanced(3, 1, 0, 0);
+	// #DXR
+	if (_isRaster)
+	{
+		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+		m_commandList->DrawInstanced(3, 1, 0, 0);
+	}
+	else
+	{
+		const float clearColor[] = {0.6f, 0.8f, 0.4f, 1.0f};
+		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	}
+
 
 	// Indicate that the back buffer will now be used to present.
 	m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
@@ -338,3 +357,44 @@ void D3D12HelloTriangle::WaitForPreviousFrame()
 
 	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 }
+
+//////////////////////////////////////////////////////////////////////////
+//
+// #DXR
+
+//provide access to raytracing objects and the latest pixel/vertex shaders.
+//This is only required until official support of DXR within the stock DirectX SDK, which should happen with Windows 10 RS5.
+void D3D12HelloTriangle::activateExperimentalFeatures() {
+	// Temporary: Before Win10 RS5 raytracing and raster/raytracing compatibilities are in a prototype
+		// state. Therefore, they need to be explicitly enabled BEFORE creating the device
+	static const GUID guids[] = { D3D12RaytracingPrototype };
+
+	HRESULT hr = D3D12EnableExperimentalFeatures(1, guids, nullptr, nullptr);
+
+	if (FAILED(hr))
+	{
+		printf("Could not enable raytracing (D3D12EnableExperimentalFeatures() "
+			"failed, hr=0x%X).\n"
+			"Possible reasons:\n"
+			"  1) your OS is not in developer mode\n"
+			"  2) your GPU driver doesn't match the D3D12 runtime loaded by the "
+			"app (d3d12.dll and friends)\n"
+			"  3) your D3D12 runtime doesn't match the D3D12 headers used by "
+			"your app (in particular, the GUID passed to "
+			"D3D12EnableExperimentalFeatures)\n\n",
+			hr);
+	}
+
+	ThrowIfFailed(hr);
+}
+
+void D3D12HelloTriangle::OnKeyUp(UINT8 key) {
+	// Alternate between rasterization and raytracing using the spacebar
+	if (key == VK_SPACE)
+	{
+		_isRaster = !_isRaster;
+	}
+}
+
+
+

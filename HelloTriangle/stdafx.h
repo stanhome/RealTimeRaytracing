@@ -30,3 +30,7 @@
 #include <string>
 #include <wrl.h>
 #include <shellapi.h>
+
+#include "d3d12.h"
+#include "d3d12_1.h"
+#include <atlbase.h>
