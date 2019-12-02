@@ -13,22 +13,33 @@
 #include "DXSample.h"
 
 using namespace Microsoft::WRL;
+using namespace std;
 
 DXSample::DXSample(UINT width, UINT height, std::wstring name) :
 	m_width(width),
 	m_height(height),
+	m_windowBounds{ 0,0,0,0 },
 	m_title(name),
-	m_useWarpDevice(false)
+	m_aspectRatio(0.0f),
+	m_enableUI(true),
+	m_adapterIDoverride(UINT_MAX)
 {
 	WCHAR assetsPath[512];
 	GetAssetsPath(assetsPath, _countof(assetsPath));
 	m_assetsPath = assetsPath;
 
-	m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+	UpdateForSizeChange(width, height);
 }
 
 DXSample::~DXSample()
 {
+}
+
+void DXSample::UpdateForSizeChange(UINT clientWidth, UINT clientHeight)
+{
+	m_width = clientWidth;
+	m_height = clientHeight;
+	m_aspectRatio = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
 }
 
 // Helper function for resolving the full path of assets.
@@ -36,6 +47,7 @@ std::wstring DXSample::GetAssetFullPath(LPCWSTR assetName)
 {
 	return m_assetsPath + assetName;
 }
+
 
 // Helper function for acquiring the first available hardware adapter that supports Direct3D 12.
 // If no such adapter can be found, *ppAdapter will be set to nullptr.
@@ -81,11 +93,29 @@ void DXSample::ParseCommandLineArgs(WCHAR* argv[], int argc)
 {
 	for (int i = 1; i < argc; ++i)
 	{
-		if (_wcsnicmp(argv[i], L"-warp", wcslen(argv[i])) == 0 || 
-			_wcsnicmp(argv[i], L"/warp", wcslen(argv[i])) == 0)
+		// -disableUI
+		if (_wcsnicmp(argv[i], L"-disableUI", wcslen(argv[i])) == 0 ||
+			_wcsnicmp(argv[i], L"/disableUI", wcslen(argv[i])) == 0)
 		{
-			m_useWarpDevice = true;
-			m_title = m_title + L" (WARP)";
+			m_enableUI = false;
+		}
+		// -forceAdapter [id]
+		else if (_wcsnicmp(argv[i], L"-forceAdapter", wcslen(argv[i])) == 0 ||
+			_wcsnicmp(argv[i], L"/forceAdapter", wcslen(argv[i])) == 0)
+		{
+			ThrowIfFalse(i + 1 < argc, L"Incorrect argument format passed in.");
+
+			m_adapterIDoverride = _wtoi(argv[i + 1]);
+			i++;
 		}
 	}
+
+}
+
+void DXSample::SetWindowBounds(int left, int top, int right, int bottom)
+{
+	m_windowBounds.left = static_cast<LONG>(left);
+	m_windowBounds.top = static_cast<LONG>(top);
+	m_windowBounds.right = static_cast<LONG>(right);
+	m_windowBounds.bottom = static_cast<LONG>(bottom);
 }

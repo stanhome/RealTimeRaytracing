@@ -14,7 +14,7 @@
 #include "DXSampleHelper.h"
 #include "Win32Application.h"
 
-class DXSample
+class DXSample : public DX::IDeviceNotify
 {
 public:
 	DXSample(UINT width, UINT height, std::wstring name);
@@ -23,21 +23,34 @@ public:
 	virtual void OnInit() = 0;
 	virtual void OnUpdate() = 0;
 	virtual void OnRender() = 0;
+	virtual void OnSizeChanged(UINT width, UINT height, bool minimized) = 0;
 	virtual void OnDestroy() = 0;
 
 	// Samples override the event handlers to handle specific messages.
-	virtual void OnKeyDown(UINT8 /*key*/)   {}
-	virtual void OnKeyUp(UINT8 /*key*/)     {}
+	virtual void OnKeyDown(UINT8 /*key*/) {}
+	virtual void OnKeyUp(UINT8 /*key*/) {}
+	virtual void OnWindowMoved(int /*x*/, int /*y*/) {}
+	virtual void OnMouseMove(UINT /*x*/, UINT /*y*/) {}
+	virtual void OnLeftButtonDown(UINT /*x*/, UINT /*y*/) {}
+	virtual void OnLeftButtonUp(UINT /*x*/, UINT /*y*/) {}
+	virtual void OnDisplayChanged() {}
+
+	// Overridable members.
+	virtual void ParseCommandLineArgs(_In_reads_(argc) WCHAR* argv[], int argc);
 
 	// Accessors.
-	UINT GetWidth() const           { return m_width; }
-	UINT GetHeight() const          { return m_height; }
-	const WCHAR* GetTitle() const   { return m_title.c_str(); }
+	UINT GetWidth() const { return m_width; }
+	UINT GetHeight() const { return m_height; }
+	const WCHAR* GetTitle() const { return m_title.c_str(); }
+	RECT GetWindowsBounds() const { return m_windowBounds; }
+	virtual IDXGISwapChain* GetSwapchain() { return nullptr; }
+	DX::DeviceResources* GetDeviceResources() const { return m_deviceResources.get(); }
 
-	void ParseCommandLineArgs(_In_reads_(argc) WCHAR* argv[], int argc);
+	void UpdateForSizeChange(UINT clientWidth, UINT clientHeight);
+	void SetWindowBounds(int left, int top, int right, int bottom);
+	std::wstring GetAssetFullPath(LPCWSTR assetName);
 
 protected:
-	std::wstring GetAssetFullPath(LPCWSTR assetName);
 	void GetHardwareAdapter(_In_ IDXGIFactory2* pFactory, _Outptr_result_maybenull_ IDXGIAdapter1** ppAdapter);
 	void SetCustomWindowText(LPCWSTR text);
 
@@ -47,7 +60,17 @@ protected:
 	float m_aspectRatio;
 
 	// Adapter info.
-	bool m_useWarpDevice;
+	bool m_useWarpDevice = false;
+
+	// Window bounds
+	RECT m_windowBounds;
+
+	// Override to be able to start without Dx11on12 UI for PIX. PIX doesn't support 11 on 12. 
+	bool m_enableUI;
+
+	// D3D device resources
+	UINT m_adapterIDoverride;
+	std::unique_ptr<DX::DeviceResources> m_deviceResources;
 
 private:
 	// Root assets path.

@@ -11,390 +11,669 @@
 
 #include "stdafx.h"
 #include "D3D12HelloTriangle.h"
+#include "DirectXRaytracingHelper.h"
+#include "CompiledShaders\Raytracing.hlsl.h"
+
+
+using namespace std;
+using namespace DX;
+
+const wchar_t* D3D12HelloTriangle::c_hitGroupName = L"MyHitGroup";
+const wchar_t* D3D12HelloTriangle::c_raygenShaderName = L"MyRaygenShader";
+const wchar_t* D3D12HelloTriangle::c_closestHitShaderName = L"MyClosestHitShader";
+const wchar_t* D3D12HelloTriangle::c_missShaderName = L"MyMissShader";
 
 D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring name) :
 	DXSample(width, height, name),
-	m_frameIndex(0),
-	m_viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
-	m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
-	m_rtvDescriptorSize(0)
+	m_raytracingOutputResourceUAVDescriptorHeapIndex(UINT_MAX)
 {
+	m_rayGenCB.viewport = { -1.0f, -1.0f, 1.0f, 1.0f };
+	UpdateForSizeChange(width, height);
 }
 
 void D3D12HelloTriangle::OnInit()
 {
-	// not needed in My win 10 v1903, os version:18362.476
-	//activateExperimentalFeatures();
+	m_deviceResources = std::make_unique<DeviceResources>(
+		DXGI_FORMAT_R8G8B8A8_UNORM,
+		DXGI_FORMAT_UNKNOWN,
+		FrameCount,
+		D3D_FEATURE_LEVEL_11_0,
+		// Sample shows handling of use cases with tearing support, which is OS dependent and has been supported since TH2.
+		// Since the sample requires build 1809 (RS5) or higher, we don't need to handle non-tearing cases.
+		DeviceResources::c_RequireTearingSupport,
+		m_adapterIDoverride
+		);
+	m_deviceResources->RegisterDeviceNotify(this);
+	m_deviceResources->SetWindow(Win32Application::GetHwnd(), m_width, m_height);
+	m_deviceResources->InitializeDXGIAdapter();
 
-	LoadPipeline();
-	LoadAssets();
+	ThrowIfFalse(IsDirectXRaytracingSupported(m_deviceResources->GetAdapter()),
+		L"ERROR: DirectX Raytracing is not supported by your OS, GPU and/or driver.\n\n");
 
-	// Cast the DX12 device to a raytracing prototype device to access RT-specific methods
-	ThrowIfFailed(m_device->QueryInterface(IID_PPV_ARGS(&_rtDevice)));
+	m_deviceResources->CreateDeviceResources();
+	m_deviceResources->CreateWindowSizeDependentResources();
 
-	// Command lists are created in the recording state, but there is nothing
-	// to record yet. The main loop expects it to be closed, so close it now.
-	bool isClose = m_commandList->Close();
-	ThrowIfFailed(isClose);
+	CreateDeviceDependentResources();
+	CreateWindowSizeDependentResources();
 }
 
-// Load the rendering pipeline dependencies.
-void D3D12HelloTriangle::LoadPipeline()
+// Create resources that depend on the device.
+void D3D12HelloTriangle::CreateDeviceDependentResources()
 {
-	UINT dxgiFactoryFlags = 0;
+	// Initialize raytracing pipeline.
 
-#if defined(_DEBUG)
-	// Enable the debug layer (requires the Graphics Tools "optional feature").
-	// NOTE: Enabling the debug layer after device creation will invalidate the active device.
-	{
-		ComPtr<ID3D12Debug> debugController;
-		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
-		{
-			debugController->EnableDebugLayer();
+	// Create raytracing interfaces: raytracing device and commandlist.
+	CreateRaytracingInterfaces();
 
-			// Enable additional debug layers.
-			dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-		}
-	}
-#endif
+	// Create root signatures for the shaders.
+	CreateRootSignatures();
 
-	ComPtr<IDXGIFactory4> factory;
-	ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+	// Create a raytracing pipeline state object which defines the binding of shaders, state and resources to be used during raytracing.
+	CreateRaytracingPipelineStateObject();
 
-	if (m_useWarpDevice)
-	{
-		ComPtr<IDXGIAdapter> warpAdapter;
-		ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
+	// Create a heap for descriptors.
+	CreateDescriptorHeap();
 
-		ThrowIfFailed(D3D12CreateDevice(
-			warpAdapter.Get(),
-			D3D_FEATURE_LEVEL_11_0,
-			IID_PPV_ARGS(&m_device)
-			));
-	}
-	else
-	{
-		ComPtr<IDXGIAdapter1> hardwareAdapter;
-		GetHardwareAdapter(factory.Get(), &hardwareAdapter);
+	// Build geometry to be used in the sample.
+	BuildGeometry();
 
-		ThrowIfFailed(D3D12CreateDevice(
-			hardwareAdapter.Get(),
-			D3D_FEATURE_LEVEL_11_0,
-			IID_PPV_ARGS(&m_device)
-			));
-	}
+	// Build raytracing acceleration structures from the generated geometry.
+	BuildAccelerationStructures();
 
-	// Describe and create the command queue.
-	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	// Build shader tables, which define shaders and their local root arguments.
+	BuildShaderTables();
 
-	ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
-
-	// Describe and create the swap chain.
-	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-	swapChainDesc.BufferCount = FrameCount;
-	swapChainDesc.Width = m_width;
-	swapChainDesc.Height = m_height;
-	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	swapChainDesc.SampleDesc.Count = 1;
-
-	ComPtr<IDXGISwapChain1> swapChain;
-	ThrowIfFailed(factory->CreateSwapChainForHwnd(
-		m_commandQueue.Get(),		// Swap chain needs the queue so that it can force a flush on it.
-		Win32Application::GetHwnd(),
-		&swapChainDesc,
-		nullptr,
-		nullptr,
-		&swapChain
-		));
-
-	// This sample does not support fullscreen transitions.
-	ThrowIfFailed(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER));
-
-	ThrowIfFailed(swapChain.As(&m_swapChain));
-	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-
-	// Create descriptor heaps.
-	{
-		// Describe and create a render target view (RTV) descriptor heap.
-		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-		rtvHeapDesc.NumDescriptors = FrameCount;
-		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-		rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
-
-		m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	}
-
-	// Create frame resources.
-	{
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
-
-		// Create a RTV for each frame.
-		for (UINT n = 0; n < FrameCount; n++)
-		{
-			ThrowIfFailed(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])));
-			m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
-			rtvHandle.Offset(1, m_rtvDescriptorSize);
-		}
-	}
-
-	ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
+	// Create an output 2D texture to store the raytracing result to.
+	CreateRaytracingOutputResource();
 }
 
-// Load the sample assets.
-void D3D12HelloTriangle::LoadAssets()
+void D3D12HelloTriangle::SerializeAndCreateRaytracingRootSignature(D3D12_ROOT_SIGNATURE_DESC& desc, ComPtr<ID3D12RootSignature>* rootSig)
 {
-	// Create an empty root signature.
-	{
-		CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-		rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+	auto device = m_deviceResources->GetD3DDevice();
+	ComPtr<ID3DBlob> blob;
+	ComPtr<ID3DBlob> error;
 
-		ComPtr<ID3DBlob> signature;
-		ComPtr<ID3DBlob> error;
-		ThrowIfFailed(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
-		ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+	ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error), error ? static_cast<wchar_t*>(error->GetBufferPointer()) : nullptr);
+	ThrowIfFailed(device->CreateRootSignature(1, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&(*rootSig))));
+}
+
+void D3D12HelloTriangle::CreateRootSignatures()
+{
+	// Global Root Signature
+	// This is a root signature that is shared across all raytracing shaders invoked during a DispatchRays() call.
+	{
+		CD3DX12_DESCRIPTOR_RANGE UAVDescriptor;
+		UAVDescriptor.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+		CD3DX12_ROOT_PARAMETER rootParameters[GlobalRootSignatureParams::Count];
+		rootParameters[GlobalRootSignatureParams::OutputViewSlot].InitAsDescriptorTable(1, &UAVDescriptor);
+		rootParameters[GlobalRootSignatureParams::AccelerationStructureSlot].InitAsShaderResourceView(0);
+		CD3DX12_ROOT_SIGNATURE_DESC globalRootSignatureDesc(ARRAYSIZE(rootParameters), rootParameters);
+		SerializeAndCreateRaytracingRootSignature(globalRootSignatureDesc, &m_raytracingGlobalRootSignature);
 	}
 
-	// Create the pipeline state, which includes compiling and loading shaders.
+	// Local Root Signature
+	// This is a root signature that enables a shader to have unique arguments that come from shader tables.
 	{
-		ComPtr<ID3DBlob> vertexShader;
-		ComPtr<ID3DBlob> pixelShader;
+		CD3DX12_ROOT_PARAMETER rootParameters[LocalRootSignatureParams::Count];
+		rootParameters[LocalRootSignatureParams::ViewportConstantSlot].InitAsConstants(SizeOfInUint32(m_rayGenCB), 0, 0);
+		CD3DX12_ROOT_SIGNATURE_DESC localRootSignatureDesc(ARRAYSIZE(rootParameters), rootParameters);
+		localRootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+		SerializeAndCreateRaytracingRootSignature(localRootSignatureDesc, &m_raytracingLocalRootSignature);
+	}
+}
 
-#if defined(_DEBUG)
-		// Enable better shader debugging with the graphics debugging tools.
-		UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#else
-		UINT compileFlags = 0;
+// Create raytracing device and command list.
+void D3D12HelloTriangle::CreateRaytracingInterfaces()
+{
+	auto device = m_deviceResources->GetD3DDevice();
+	auto commandList = m_deviceResources->GetCommandList();
+
+	ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&m_dxrDevice)), L"Couldn't get DirectX Raytracing interface for the device.\n");
+	ThrowIfFailed(commandList->QueryInterface(IID_PPV_ARGS(&m_dxrCommandList)), L"Couldn't get DirectX Raytracing interface for the command list.\n");
+}
+
+// Local root signature and shader association
+// This is a root signature that enables a shader to have unique arguments that come from shader tables.
+void D3D12HelloTriangle::CreateLocalRootSignatureSubobjects(CD3DX12_STATE_OBJECT_DESC* raytracingPipeline)
+{
+	// Hit group and miss shaders in this sample are not using a local root signature and thus one is not associated with them.
+
+	// Local root signature to be used in a ray gen shader.
+	{
+		auto localRootSignature = raytracingPipeline->CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+		localRootSignature->SetRootSignature(m_raytracingLocalRootSignature.Get());
+		// Shader association
+		auto rootSignatureAssociation = raytracingPipeline->CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+		rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignature);
+		rootSignatureAssociation->AddExport(c_raygenShaderName);
+	}
+}
+
+// Create a raytracing pipeline state object (RTPSO).
+// An RTPSO represents a full set of shaders reachable by a DispatchRays() call,
+// with all configuration options resolved, such as local signatures and other state.
+void D3D12HelloTriangle::CreateRaytracingPipelineStateObject()
+{
+	// Create 7 subobjects that combine into a RTPSO:
+	// Subobjects need to be associated with DXIL exports (i.e. shaders) either by way of default or explicit associations.
+	// Default association applies to every exported shader entrypoint that doesn't have any of the same type of subobject associated with it.
+	// This simple sample utilizes default shader association except for local root signature subobject
+	// which has an explicit association specified purely for demonstration purposes.
+	// 1 - DXIL library
+	// 1 - Triangle hit group
+	// 1 - Shader config
+	// 2 - Local root signature and association
+	// 1 - Global root signature
+	// 1 - Pipeline config
+	CD3DX12_STATE_OBJECT_DESC raytracingPipeline{ D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE };
+
+
+	// DXIL library
+	// This contains the shaders and their entrypoints for the state object.
+	// Since shaders are not considered a subobject, they need to be passed in via DXIL library subobjects.
+	auto lib = raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+	D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE((void *)g_pRaytracing, ARRAYSIZE(g_pRaytracing));
+	lib->SetDXILLibrary(&libdxil);
+	// Define which shader exports to surface from the library.
+	// If no shader exports are defined for a DXIL library subobject, all shaders will be surfaced.
+	// In this sample, this could be omitted for convenience since the sample uses all shaders in the library. 
+	{
+		lib->DefineExport(c_raygenShaderName);
+		lib->DefineExport(c_closestHitShaderName);
+		lib->DefineExport(c_missShaderName);
+	}
+
+	// Triangle hit group
+	// A hit group specifies closest hit, any hit and intersection shaders to be executed when a ray intersects the geometry's triangle/AABB.
+	// In this sample, we only use triangle geometry with a closest hit shader, so others are not set.
+	auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+	hitGroup->SetClosestHitShaderImport(c_closestHitShaderName);
+	hitGroup->SetHitGroupExport(c_hitGroupName);
+	hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+
+	// Shader config
+	// Defines the maximum sizes in bytes for the ray payload and attribute structure.
+	auto shaderConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
+	UINT payloadSize = 4 * sizeof(float);   // float4 color
+	UINT attributeSize = 2 * sizeof(float); // float2 barycentrics
+	shaderConfig->Config(payloadSize, attributeSize);
+
+	// Local root signature and shader association
+	CreateLocalRootSignatureSubobjects(&raytracingPipeline);
+	// This is a root signature that enables a shader to have unique arguments that come from shader tables.
+
+	// Global root signature
+	// This is a root signature that is shared across all raytracing shaders invoked during a DispatchRays() call.
+	auto globalRootSignature = raytracingPipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+	globalRootSignature->SetRootSignature(m_raytracingGlobalRootSignature.Get());
+
+	// Pipeline config
+	// Defines the maximum TraceRay() recursion depth.
+	auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
+	// PERFOMANCE TIP: Set max recursion depth as low as needed 
+	// as drivers may apply optimization strategies for low recursion depths. 
+	UINT maxRecursionDepth = 1; // ~ primary rays only. 
+	pipelineConfig->Config(maxRecursionDepth);
+
+#if _DEBUG
+	PrintStateObjectDesc(raytracingPipeline);
 #endif
 
-		ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"shaders.hlsl").c_str(), nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, nullptr));
-		ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"shaders.hlsl").c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, nullptr));
+	// Create the state object.
+	ThrowIfFailed(m_dxrDevice->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&m_dxrStateObject)), L"Couldn't create DirectX Raytracing state object.\n");
+}
 
-		// Define the vertex input layout.
-		D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
-		{
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-			{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-		};
+// Create 2D output texture for raytracing.
+void D3D12HelloTriangle::CreateRaytracingOutputResource()
+{
+	auto device = m_deviceResources->GetD3DDevice();
+	auto backbufferFormat = m_deviceResources->GetBackBufferFormat();
 
-		// Describe and create the graphics pipeline state object (PSO).
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-		psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
-		psoDesc.pRootSignature = m_rootSignature.Get();
-		psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-		psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-		psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-		psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-		psoDesc.DepthStencilState.DepthEnable = FALSE;
-		psoDesc.DepthStencilState.StencilEnable = FALSE;
-		psoDesc.SampleMask = UINT_MAX;
-		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-		psoDesc.NumRenderTargets = 1;
-		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		psoDesc.SampleDesc.Count = 1;
-		ThrowIfFailed(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
+	// Create the output resource. The dimensions and format should match the swap-chain.
+	auto uavDesc = CD3DX12_RESOURCE_DESC::Tex2D(backbufferFormat, m_width, m_height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+	auto defaultHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+	ThrowIfFailed(device->CreateCommittedResource(
+		&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &uavDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_raytracingOutput)));
+	NAME_D3D12_OBJECT(m_raytracingOutput);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE uavDescriptorHandle;
+	m_raytracingOutputResourceUAVDescriptorHeapIndex = AllocateDescriptor(&uavDescriptorHandle, m_raytracingOutputResourceUAVDescriptorHeapIndex);
+	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
+	UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+	device->CreateUnorderedAccessView(m_raytracingOutput.Get(), nullptr, &UAVDesc, uavDescriptorHandle);
+	m_raytracingOutputResourceUAVGpuDescriptor = CD3DX12_GPU_DESCRIPTOR_HANDLE(m_descriptorHeap->GetGPUDescriptorHandleForHeapStart(), m_raytracingOutputResourceUAVDescriptorHeapIndex, m_descriptorSize);
+}
+
+void D3D12HelloTriangle::CreateDescriptorHeap()
+{
+	auto device = m_deviceResources->GetD3DDevice();
+
+	D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc = {};
+	// Allocate a heap for 3 descriptors:
+	// 1 - raytracing output texture SRV
+	descriptorHeapDesc.NumDescriptors = 1;
+	descriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	descriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	descriptorHeapDesc.NodeMask = 0;
+	device->CreateDescriptorHeap(&descriptorHeapDesc, IID_PPV_ARGS(&m_descriptorHeap));
+	NAME_D3D12_OBJECT(m_descriptorHeap);
+
+	m_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+}
+
+// Build geometry used in the sample.
+void D3D12HelloTriangle::BuildGeometry()
+{
+	auto device = m_deviceResources->GetD3DDevice();
+	Index indices[] =
+	{
+		0, 1, 2
+	};
+
+	float depthValue = 1.0;
+	float offset = 0.7f;
+	Vertex vertices[] =
+	{
+		// The sample raytraces in screen space coordinates.
+		// Since DirectX screen space coordinates are right handed (i.e. Y axis points down).
+		// Define the vertices in counter clockwise order ~ clockwise in left handed.
+		{ 0, -offset, depthValue },
+		{ -offset, offset, depthValue },
+		{ offset, offset, depthValue }
+	};
+
+	AllocateUploadBuffer(device, vertices, sizeof(vertices), &m_vertexBuffer);
+	AllocateUploadBuffer(device, indices, sizeof(indices), &m_indexBuffer);
+}
+
+// Build acceleration structures needed for raytracing.
+void D3D12HelloTriangle::BuildAccelerationStructures()
+{
+	auto device = m_deviceResources->GetD3DDevice();
+	auto commandList = m_deviceResources->GetCommandList();
+	auto commandQueue = m_deviceResources->GetCommandQueue();
+	auto commandAllocator = m_deviceResources->GetCommandAllocator();
+
+	// Reset the command list for the acceleration structure construction.
+	commandList->Reset(commandAllocator, nullptr);
+
+	D3D12_RAYTRACING_GEOMETRY_DESC geometryDesc = {};
+	geometryDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+	geometryDesc.Triangles.IndexBuffer = m_indexBuffer->GetGPUVirtualAddress();
+	geometryDesc.Triangles.IndexCount = static_cast<UINT>(m_indexBuffer->GetDesc().Width) / sizeof(Index);
+	geometryDesc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
+	geometryDesc.Triangles.Transform3x4 = 0;
+	geometryDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+	geometryDesc.Triangles.VertexCount = static_cast<UINT>(m_vertexBuffer->GetDesc().Width) / sizeof(Vertex);
+	geometryDesc.Triangles.VertexBuffer.StartAddress = m_vertexBuffer->GetGPUVirtualAddress();
+	geometryDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+
+	// Mark the geometry as opaque. 
+	// PERFORMANCE TIP: mark geometry as opaque whenever applicable as it can enable important ray processing optimizations.
+	// Note: When rays encounter opaque geometry an any hit shader will not be executed whether it is present or not.
+	geometryDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+	// Get required sizes for an acceleration structure.
+	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS buildFlags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS topLevelInputs = {};
+	topLevelInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+	topLevelInputs.Flags = buildFlags;
+	topLevelInputs.NumDescs = 1;
+	topLevelInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+
+	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO topLevelPrebuildInfo = {};
+	m_dxrDevice->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelInputs, &topLevelPrebuildInfo);
+	ThrowIfFalse(topLevelPrebuildInfo.ResultDataMaxSizeInBytes > 0);
+
+	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottomLevelPrebuildInfo = {};
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS bottomLevelInputs = topLevelInputs;
+	bottomLevelInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+	bottomLevelInputs.pGeometryDescs = &geometryDesc;
+	m_dxrDevice->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs, &bottomLevelPrebuildInfo);
+	ThrowIfFalse(bottomLevelPrebuildInfo.ResultDataMaxSizeInBytes > 0);
+
+	ComPtr<ID3D12Resource> scratchResource;
+	AllocateUAVBuffer(device, max(topLevelPrebuildInfo.ScratchDataSizeInBytes, bottomLevelPrebuildInfo.ScratchDataSizeInBytes), &scratchResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, L"ScratchResource");
+
+	// Allocate resources for acceleration structures.
+	// Acceleration structures can only be placed in resources that are created in the default heap (or custom heap equivalent). 
+	// Default heap is OK since the application doesn’t need CPU read/write access to them. 
+	// The resources that will contain acceleration structures must be created in the state D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, 
+	// and must have resource flag D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS. The ALLOW_UNORDERED_ACCESS requirement simply acknowledges both: 
+	//  - the system will be doing this type of access in its implementation of acceleration structure builds behind the scenes.
+	//  - from the app point of view, synchronization of writes/reads to acceleration structures is accomplished using UAV barriers.
+	{
+		D3D12_RESOURCE_STATES initialResourceState = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+
+		AllocateUAVBuffer(device, bottomLevelPrebuildInfo.ResultDataMaxSizeInBytes, &m_bottomLevelAccelerationStructure, initialResourceState, L"BottomLevelAccelerationStructure");
+		AllocateUAVBuffer(device, topLevelPrebuildInfo.ResultDataMaxSizeInBytes, &m_topLevelAccelerationStructure, initialResourceState, L"TopLevelAccelerationStructure");
 	}
 
-	// Create the command list.
-	ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
+	// Create an instance desc for the bottom-level acceleration structure.
+	ComPtr<ID3D12Resource> instanceDescs;
+	D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
+	instanceDesc.Transform[0][0] = instanceDesc.Transform[1][1] = instanceDesc.Transform[2][2] = 1;
+	instanceDesc.InstanceMask = 1;
+	instanceDesc.AccelerationStructure = m_bottomLevelAccelerationStructure->GetGPUVirtualAddress();
+	AllocateUploadBuffer(device, &instanceDesc, sizeof(instanceDesc), &instanceDescs, L"InstanceDescs");
 
-
-	// Create the vertex buffer.
+	// Bottom Level Acceleration Structure desc
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bottomLevelBuildDesc = {};
 	{
-		// Define the geometry for a triangle.
-		Vertex triangleVertices[] =
-		{
-			{ { 0.0f, 0.25f * m_aspectRatio, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },
-			{ { 0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
-			{ { -0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }
-		};
-
-		const UINT vertexBufferSize = sizeof(triangleVertices);
-
-		// Note: using upload heaps to transfer static data like vert buffers is not 
-		// recommended. Every time the GPU needs it, the upload heap will be marshalled 
-		// over. Please read up on Default Heap usage. An upload heap is used here for 
-		// code simplicity and because there are very few verts to actually transfer.
-		ThrowIfFailed(m_device->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-			D3D12_HEAP_FLAG_NONE,
-			&CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&m_vertexBuffer)));
-
-		// Copy the triangle data to the vertex buffer.
-		UINT8* pVertexDataBegin;
-		CD3DX12_RANGE readRange(0, 0);		// We do not intend to read from this resource on the CPU.
-		ThrowIfFailed(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)));
-		memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-		m_vertexBuffer->Unmap(0, nullptr);
-
-		// Initialize the vertex buffer view.
-		m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-		m_vertexBufferView.StrideInBytes = sizeof(Vertex);
-		m_vertexBufferView.SizeInBytes = vertexBufferSize;
+		bottomLevelBuildDesc.Inputs = bottomLevelInputs;
+		bottomLevelBuildDesc.ScratchAccelerationStructureData = scratchResource->GetGPUVirtualAddress();
+		bottomLevelBuildDesc.DestAccelerationStructureData = m_bottomLevelAccelerationStructure->GetGPUVirtualAddress();
 	}
 
-	// Create synchronization objects and wait until assets have been uploaded to the GPU.
+	// Top Level Acceleration Structure desc
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC topLevelBuildDesc = {};
 	{
-		ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-		m_fenceValue = 1;
+		topLevelInputs.InstanceDescs = instanceDescs->GetGPUVirtualAddress();
+		topLevelBuildDesc.Inputs = topLevelInputs;
+		topLevelBuildDesc.DestAccelerationStructureData = m_topLevelAccelerationStructure->GetGPUVirtualAddress();
+		topLevelBuildDesc.ScratchAccelerationStructureData = scratchResource->GetGPUVirtualAddress();
+	}
 
-		// Create an event handle to use for frame synchronization.
-		m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-		if (m_fenceEvent == nullptr)
-		{
-			ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-		}
+	auto BuildAccelerationStructure = [&](auto* raytracingCommandList)
+	{
+		raytracingCommandList->BuildRaytracingAccelerationStructure(&bottomLevelBuildDesc, 0, nullptr);
+		commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(m_bottomLevelAccelerationStructure.Get()));
+		raytracingCommandList->BuildRaytracingAccelerationStructure(&topLevelBuildDesc, 0, nullptr);
+	};
 
-		// Wait for the command list to execute; we are reusing the same command 
-		// list in our main loop but for now, we just want to wait for setup to 
-		// complete before continuing.
-		WaitForPreviousFrame();
+	// Build acceleration structure.
+	BuildAccelerationStructure(m_dxrCommandList.Get());
+
+	// Kick off acceleration structure construction.
+	m_deviceResources->ExecuteCommandList();
+
+	// Wait for GPU to finish as the locally created temporary GPU resources will get released once we go out of scope.
+	m_deviceResources->WaitForGpu();
+}
+
+// Build shader tables.
+// This encapsulates all shader records - shaders and the arguments for their local root signatures.
+void D3D12HelloTriangle::BuildShaderTables()
+{
+	auto device = m_deviceResources->GetD3DDevice();
+
+	void* rayGenShaderIdentifier;
+	void* missShaderIdentifier;
+	void* hitGroupShaderIdentifier;
+
+	auto GetShaderIdentifiers = [&](auto* stateObjectProperties)
+	{
+		rayGenShaderIdentifier = stateObjectProperties->GetShaderIdentifier(c_raygenShaderName);
+		missShaderIdentifier = stateObjectProperties->GetShaderIdentifier(c_missShaderName);
+		hitGroupShaderIdentifier = stateObjectProperties->GetShaderIdentifier(c_hitGroupName);
+	};
+
+	// Get shader identifiers.
+	UINT shaderIdentifierSize;
+	{
+		ComPtr<ID3D12StateObjectProperties> stateObjectProperties;
+		ThrowIfFailed(m_dxrStateObject.As(&stateObjectProperties));
+		GetShaderIdentifiers(stateObjectProperties.Get());
+		shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+	}
+
+	// Ray gen shader table
+	{
+		struct RootArguments {
+			RayGenConstantBuffer cb;
+		} rootArguments;
+		rootArguments.cb = m_rayGenCB;
+
+		UINT numShaderRecords = 1;
+		UINT shaderRecordSize = shaderIdentifierSize + sizeof(rootArguments);
+		ShaderTable rayGenShaderTable(device, numShaderRecords, shaderRecordSize, L"RayGenShaderTable");
+		rayGenShaderTable.push_back(ShaderRecord(rayGenShaderIdentifier, shaderIdentifierSize, &rootArguments, sizeof(rootArguments)));
+		m_rayGenShaderTable = rayGenShaderTable.GetResource();
+	}
+
+	// Miss shader table
+	{
+		UINT numShaderRecords = 1;
+		UINT shaderRecordSize = shaderIdentifierSize;
+		ShaderTable missShaderTable(device, numShaderRecords, shaderRecordSize, L"MissShaderTable");
+		missShaderTable.push_back(ShaderRecord(missShaderIdentifier, shaderIdentifierSize));
+		m_missShaderTable = missShaderTable.GetResource();
+	}
+
+	// Hit group shader table
+	{
+		UINT numShaderRecords = 1;
+		UINT shaderRecordSize = shaderIdentifierSize;
+		ShaderTable hitGroupShaderTable(device, numShaderRecords, shaderRecordSize, L"HitGroupShaderTable");
+		hitGroupShaderTable.push_back(ShaderRecord(hitGroupShaderIdentifier, shaderIdentifierSize));
+		m_hitGroupShaderTable = hitGroupShaderTable.GetResource();
 	}
 }
 
 // Update frame-based values.
 void D3D12HelloTriangle::OnUpdate()
 {
+	m_timer.Tick();
+	CalculateFrameStats();
+}
+
+void D3D12HelloTriangle::DoRaytracing()
+{
+	auto commandList = m_deviceResources->GetCommandList();
+
+	auto DispatchRays = [&](auto* commandList, auto* stateObject, auto* dispatchDesc)
+	{
+		// Since each shader table has only one shader record, the stride is same as the size.
+		dispatchDesc->HitGroupTable.StartAddress = m_hitGroupShaderTable->GetGPUVirtualAddress();
+		dispatchDesc->HitGroupTable.SizeInBytes = m_hitGroupShaderTable->GetDesc().Width;
+		dispatchDesc->HitGroupTable.StrideInBytes = dispatchDesc->HitGroupTable.SizeInBytes;
+		dispatchDesc->MissShaderTable.StartAddress = m_missShaderTable->GetGPUVirtualAddress();
+		dispatchDesc->MissShaderTable.SizeInBytes = m_missShaderTable->GetDesc().Width;
+		dispatchDesc->MissShaderTable.StrideInBytes = dispatchDesc->MissShaderTable.SizeInBytes;
+		dispatchDesc->RayGenerationShaderRecord.StartAddress = m_rayGenShaderTable->GetGPUVirtualAddress();
+		dispatchDesc->RayGenerationShaderRecord.SizeInBytes = m_rayGenShaderTable->GetDesc().Width;
+		dispatchDesc->Width = m_width;
+		dispatchDesc->Height = m_height;
+		dispatchDesc->Depth = 1;
+		commandList->SetPipelineState1(stateObject);
+		commandList->DispatchRays(dispatchDesc);
+	};
+
+	commandList->SetComputeRootSignature(m_raytracingGlobalRootSignature.Get());
+
+	// Bind the heaps, acceleration structure and dispatch rays.    
+	D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
+	commandList->SetDescriptorHeaps(1, m_descriptorHeap.GetAddressOf());
+	commandList->SetComputeRootDescriptorTable(GlobalRootSignatureParams::OutputViewSlot, m_raytracingOutputResourceUAVGpuDescriptor);
+	commandList->SetComputeRootShaderResourceView(GlobalRootSignatureParams::AccelerationStructureSlot, m_topLevelAccelerationStructure->GetGPUVirtualAddress());
+	DispatchRays(m_dxrCommandList.Get(), m_dxrStateObject.Get(), &dispatchDesc);
+}
+
+// Update the application state with the new resolution.
+void D3D12HelloTriangle::UpdateForSizeChange(UINT width, UINT height)
+{
+	DXSample::UpdateForSizeChange(width, height);
+	float border = 0.1f;
+	if (m_width <= m_height)
+	{
+		m_rayGenCB.stencil =
+		{
+			-1 + border, -1 + border * m_aspectRatio,
+			1.0f - border, 1 - border * m_aspectRatio
+		};
+	}
+	else
+	{
+		m_rayGenCB.stencil =
+		{
+			-1 + border / m_aspectRatio, -1 + border,
+			 1 - border / m_aspectRatio, 1.0f - border
+		};
+
+	}
+}
+
+// Copy the raytracing output to the backbuffer.
+void D3D12HelloTriangle::CopyRaytracingOutputToBackbuffer()
+{
+	auto commandList = m_deviceResources->GetCommandList();
+	auto renderTarget = m_deviceResources->GetRenderTarget();
+
+	D3D12_RESOURCE_BARRIER preCopyBarriers[2];
+	preCopyBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(renderTarget, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST);
+	preCopyBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(m_raytracingOutput.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+	commandList->ResourceBarrier(ARRAYSIZE(preCopyBarriers), preCopyBarriers);
+
+	commandList->CopyResource(renderTarget, m_raytracingOutput.Get());
+
+	D3D12_RESOURCE_BARRIER postCopyBarriers[2];
+	postCopyBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(renderTarget, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+	postCopyBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(m_raytracingOutput.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+	commandList->ResourceBarrier(ARRAYSIZE(postCopyBarriers), postCopyBarriers);
+}
+
+// Create resources that are dependent on the size of the main window.
+void D3D12HelloTriangle::CreateWindowSizeDependentResources()
+{
+	CreateRaytracingOutputResource();
+
+	// For simplicity, we will rebuild the shader tables.
+	BuildShaderTables();
+}
+
+// Release resources that are dependent on the size of the main window.
+void D3D12HelloTriangle::ReleaseWindowSizeDependentResources()
+{
+	m_rayGenShaderTable.Reset();
+	m_missShaderTable.Reset();
+	m_hitGroupShaderTable.Reset();
+	m_raytracingOutput.Reset();
+}
+
+// Release all resources that depend on the device.
+void D3D12HelloTriangle::ReleaseDeviceDependentResources()
+{
+	m_raytracingGlobalRootSignature.Reset();
+	m_raytracingLocalRootSignature.Reset();
+
+	m_dxrDevice.Reset();
+	m_dxrCommandList.Reset();
+	m_dxrStateObject.Reset();
+
+	m_descriptorHeap.Reset();
+	m_descriptorsAllocated = 0;
+	m_raytracingOutputResourceUAVDescriptorHeapIndex = UINT_MAX;
+	m_indexBuffer.Reset();
+	m_vertexBuffer.Reset();
+
+	m_accelerationStructure.Reset();
+	m_bottomLevelAccelerationStructure.Reset();
+	m_topLevelAccelerationStructure.Reset();
+}
+
+void D3D12HelloTriangle::RecreateD3D()
+{
+	// Give GPU a chance to finish its execution in progress.
+	try
+	{
+		m_deviceResources->WaitForGpu();
+	}
+	catch (HrException&)
+	{
+		// Do nothing, currently attached adapter is unresponsive.
+	}
+	m_deviceResources->HandleDeviceLost();
 }
 
 // Render the scene.
 void D3D12HelloTriangle::OnRender()
 {
-	// Record all the commands we need to render the scene into the command list.
-	PopulateCommandList();
+	if (!m_deviceResources->IsWindowVisible())
+	{
+		return;
+	}
 
-	// Execute the command list.
-	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
-	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+	m_deviceResources->Prepare();
+	DoRaytracing();
+	CopyRaytracingOutputToBackbuffer();
 
-	// Present the frame.
-	ThrowIfFailed(m_swapChain->Present(1, 0));
-
-	WaitForPreviousFrame();
+	m_deviceResources->Present(D3D12_RESOURCE_STATE_PRESENT);
 }
 
 void D3D12HelloTriangle::OnDestroy()
 {
-	// Ensure that the GPU is no longer referencing resources that are about to be
-	// cleaned up by the destructor.
-	WaitForPreviousFrame();
-
-	CloseHandle(m_fenceEvent);
+	// Let GPU finish before releasing D3D resources.
+	m_deviceResources->WaitForGpu();
+	OnDeviceLost();
 }
 
-void D3D12HelloTriangle::PopulateCommandList()
+// Release all device dependent resouces when a device is lost.
+void D3D12HelloTriangle::OnDeviceLost()
 {
-	// Command list allocators can only be reset when the associated 
-	// command lists have finished execution on the GPU; apps should use 
-	// fences to determine GPU execution progress.
-	ThrowIfFailed(m_commandAllocator->Reset());
-
-	// However, when ExecuteCommandList() is called on a particular command 
-	// list, that command list can then be reset at any time and must be before 
-	// re-recording.
-	ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get()));
-
-	// Set necessary state.
-	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-	m_commandList->RSSetViewports(1, &m_viewport);
-	m_commandList->RSSetScissorRects(1, &m_scissorRect);
-
-	// Indicate that the back buffer will be used as a render target.
-	m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
-	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-
-
-	// Record commands.
-	// #DXR
-	if (_isRaster)
-	{
-		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-		m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-		m_commandList->DrawInstanced(3, 1, 0, 0);
-	}
-	else
-	{
-		const float clearColor[] = {0.6f, 0.8f, 0.4f, 1.0f};
-		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-	}
-
-
-	// Indicate that the back buffer will now be used to present.
-	m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-
-	ThrowIfFailed(m_commandList->Close());
+	ReleaseWindowSizeDependentResources();
+	ReleaseDeviceDependentResources();
 }
 
-void D3D12HelloTriangle::WaitForPreviousFrame()
+// Create all device dependent resources when a device is restored.
+void D3D12HelloTriangle::OnDeviceRestored()
 {
-	// WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-	// This is code implemented as such for simplicity. The D3D12HelloFrameBuffering
-	// sample illustrates how to use fences for efficient resource usage and to
-	// maximize GPU utilization.
-
-	// Signal and increment the fence value.
-	const UINT64 fence = m_fenceValue;
-	ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), fence));
-	m_fenceValue++;
-
-	// Wait until the previous frame is finished.
-	if (m_fence->GetCompletedValue() < fence)
-	{
-		ThrowIfFailed(m_fence->SetEventOnCompletion(fence, m_fenceEvent));
-		WaitForSingleObject(m_fenceEvent, INFINITE);
-	}
-
-	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+	CreateDeviceDependentResources();
+	CreateWindowSizeDependentResources();
 }
 
-//////////////////////////////////////////////////////////////////////////
-//
-// #DXR
+// Compute the average frames per second and million rays per second.
+void D3D12HelloTriangle::CalculateFrameStats()
+{
+	static int frameCnt = 0;
+	static double elapsedTime = 0.0f;
+	double totalTime = m_timer.GetTotalSeconds();
+	frameCnt++;
 
-//provide access to raytracing objects and the latest pixel/vertex shaders.
-//This is only required until official support of DXR within the stock DirectX SDK, which should happen with Windows 10 RS5.
-void D3D12HelloTriangle::activateExperimentalFeatures() {
-	// Temporary: Before Win10 RS5 raytracing and raster/raytracing compatibilities are in a prototype
-		// state. Therefore, they need to be explicitly enabled BEFORE creating the device
-	static const GUID guids[] = { D3D12RaytracingPrototype };
-
-	HRESULT hr = D3D12EnableExperimentalFeatures(1, guids, nullptr, nullptr);
-
-	if (FAILED(hr))
+	// Compute averages over one second period.
+	if ((totalTime - elapsedTime) >= 1.0f)
 	{
-		printf("Could not enable raytracing (D3D12EnableExperimentalFeatures() "
-			"failed, hr=0x%X).\n"
-			"Possible reasons:\n"
-			"  1) your OS is not in developer mode\n"
-			"  2) your GPU driver doesn't match the D3D12 runtime loaded by the "
-			"app (d3d12.dll and friends)\n"
-			"  3) your D3D12 runtime doesn't match the D3D12 headers used by "
-			"your app (in particular, the GUID passed to "
-			"D3D12EnableExperimentalFeatures)\n\n",
-			hr);
-	}
+		float diff = static_cast<float>(totalTime - elapsedTime);
+		float fps = static_cast<float>(frameCnt) / diff; // Normalize to an exact second.
 
-	ThrowIfFailed(hr);
-}
+		frameCnt = 0;
+		elapsedTime = totalTime;
 
-void D3D12HelloTriangle::OnKeyUp(UINT8 key) {
-	// Alternate between rasterization and raytracing using the spacebar
-	if (key == VK_SPACE)
-	{
-		_isRaster = !_isRaster;
+		float MRaysPerSecond = (m_width * m_height * fps) / static_cast<float>(1e6);
+
+		wstringstream windowText;
+
+		windowText << setprecision(2) << fixed
+			<< L"    fps: " << fps << L"     ~Million Primary Rays/s: " << MRaysPerSecond
+			<< L"    GPU[" << m_deviceResources->GetAdapterID() << L"]: " << m_deviceResources->GetAdapterDescription();
+		SetCustomWindowText(windowText.str().c_str());
 	}
 }
 
+// Handle OnSizeChanged message event.
+void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
+{
+	if (!m_deviceResources->WindowSizeChanged(width, height, minimized))
+	{
+		return;
+	}
 
+	UpdateForSizeChange(width, height);
 
+	ReleaseWindowSizeDependentResources();
+	CreateWindowSizeDependentResources();
+}
+
+// Allocate a descriptor and return its index. 
+// If the passed descriptorIndexToUse is valid, it will be used instead of allocating a new one.
+UINT D3D12HelloTriangle::AllocateDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpuDescriptor, UINT descriptorIndexToUse)
+{
+	auto descriptorHeapCpuBase = m_descriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	if (descriptorIndexToUse >= m_descriptorHeap->GetDesc().NumDescriptors)
+	{
+		descriptorIndexToUse = m_descriptorsAllocated++;
+	}
+	*cpuDescriptor = CD3DX12_CPU_DESCRIPTOR_HANDLE(descriptorHeapCpuBase, descriptorIndexToUse, m_descriptorSize);
+	return descriptorIndexToUse;
+}

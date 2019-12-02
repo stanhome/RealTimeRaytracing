@@ -53,18 +53,18 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(ProjectDir)framework\DXR;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)framework\D3DX12;$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CompileAsWinRT>false</CompileAsWinRT>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>d3d12.dll</DelayLoadDLLs>
     </Link>
     <CustomBuildStep>
@@ -88,7 +88,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(ProjectDir)framework\DXR;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)framework\D3DX12;$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CompileAsWinRT>false</CompileAsWinRT>
     </ClCompile>
     <Link>
@@ -112,31 +112,20 @@
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="framework\DXRHelper\DXRHelper.h" />
-    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\BottomLevelASGenerator.h" />
-    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\RaytracingPipelineGenerator.h" />
-    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\RootSignatureGenerator.h" />
-    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\ShaderBindingTableGenerator.h" />
-    <ClInclude Include="framework\DXRHelper\nv_helpers_dx12\TopLevelASGenerator.h" />
-    <ClInclude Include="framework\DXR\d3d12.h" />
-    <ClInclude Include="framework\DXR\d3d12video.h" />
-    <ClInclude Include="framework\DXR\d3d12_1.h" />
-    <ClInclude Include="framework\DXR\d3dx12.h" />
-    <ClInclude Include="framework\DXR\dxcapi.h" />
-    <ClInclude Include="framework\DXR\dxcapi.use.h" />
+    <ClInclude Include="DeviceResources.h" />
+    <ClInclude Include="DirectXRaytracingHelper.h" />
+    <ClInclude Include="framework\D3DX12\d3dx12.h" />
+    <ClInclude Include="HlslCompat.h" />
+    <ClInclude Include="RaytracingHlslCompat.h" />
+    <ClInclude Include="StepTimer.h" />
     <ClInclude Include="Win32Application.h" />
     <ClInclude Include="D3D12HelloTriangle.h" />
-    <ClInclude Include="d3dx12.h" />
     <ClInclude Include="DXSample.h" />
     <ClInclude Include="DXSampleHelper.h" />
     <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\BottomLevelASGenerator.cpp" />
-    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\RaytracingPipelineGenerator.cpp" />
-    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\RootSignatureGenerator.cpp" />
-    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\ShaderBindingTableGenerator.cpp" />
-    <ClCompile Include="framework\DXRHelper\nv_helpers_dx12\TopLevelASGenerator.cpp" />
+    <ClCompile Include="DeviceResources.cpp" />
     <ClCompile Include="Win32Application.cpp" />
     <ClCompile Include="D3D12HelloTriangle.cpp" />
     <ClCompile Include="DXSample.cpp" />
@@ -151,6 +140,18 @@
       <FileType>Document</FileType>
       <DeploymentContent>true</DeploymentContent>
     </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Raytracing.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Library</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">6.3</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Domain</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">6.3</ShaderModel>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">g_p%(Filename)</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)\CompiledShaders\%(Filename).hlsl.h</HeaderFileOutput>
+      <VariableName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">g_p%(Filename)</VariableName>
+      <HeaderFileOutput Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)\CompiledShaders\%(Filename).hlsl.h</HeaderFileOutput>
+    </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
