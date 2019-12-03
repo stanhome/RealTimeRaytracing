@@ -311,7 +311,8 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 
 	// Mark the geometry as opaque. 
 	// PERFORMANCE TIP: mark geometry as opaque whenever applicable as it can enable important ray processing optimizations.
-	// Note: When rays encounter opaque geometry an any hit shader will not be executed whether it is present or not.
+	// Note: When rays encounter opaque geometry an AnyHit shader will not be executed whether it is present or not.
+	// optimize for AnyHit shader
 	geometryDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
 
 	// Get required sizes for an acceleration structure.

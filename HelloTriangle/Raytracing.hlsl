@@ -54,6 +54,20 @@ void MyRaygenShader()
 		ray.TMin = 0.001;
 		ray.TMax = 10000.0;
 		RayPayload payload = { float4(0, 0, 0, 0) };
+
+		//RAY_FLAG_CULL_BACK_FACING_TRIANGLES : Enables culling of back facing triangle
+		/*
+		Template<payload_t>
+void TraceRay(RaytracingAccelerationStructure AccelerationStructure,
+              uint RayFlags,
+              uint InstanceInclusionMask,
+              uint RayContributionToHitGroupIndex,
+              uint MultiplierForGeometryContributionToHitGroupIndex,
+              uint MissShaderIndex,
+              RayDesc Ray,
+              inout payload_t Payload);
+		*/
+
 		TraceRay(Scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
 
 		// Write the raytraced color to the output texture.
