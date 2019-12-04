@@ -14,9 +14,12 @@
 
 #include "RaytracingHlslCompat.h"
 
-RaytracingAccelerationStructure Scene : register(t0, space0);
+//Shader resources (SRV) correspond to the letter t.
+RaytracingAccelerationStructure Scene : register(t0, space0); 
+//the register means the data is accessible in the first unordered access variable (UAV, identified by the letter u) bound to the shader.
 RWTexture2D<float4> RenderTarget : register(u0);
-ConstantBuffer<RayGenConstantBuffer> g_rayGenCB : register(b0);
+//onstant buffers (CBV), can be accessed using the letter b.
+ConstantBuffer<RayGenConstantBuffer> g_rayGenCB : register(b0); 
 
 typedef BuiltInTriangleIntersectionAttributes MyAttributes;
 struct RayPayload

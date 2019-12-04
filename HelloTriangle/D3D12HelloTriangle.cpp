@@ -230,6 +230,7 @@ void D3D12HelloTriangle::CreateRaytracingOutputResource()
 	auto backbufferFormat = m_deviceResources->GetBackBufferFormat();
 
 	// Create the output resource. The dimensions and format should match the swap-chain.
+	// the raytracing output buffer is created with the D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS flag
 	auto uavDesc = CD3DX12_RESOURCE_DESC::Tex2D(backbufferFormat, m_width, m_height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
 	auto defaultHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);

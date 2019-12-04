@@ -65,7 +65,7 @@ class ShaderTable : public GpuUploadBuffer
 
     // Debug support
     std::wstring m_name;
-    std::vector<ShaderRecord> m_shaderRecords;
+	std::vector<ShaderRecord> m_shaderRecords;
 
     ShaderTable() {}
 public:
