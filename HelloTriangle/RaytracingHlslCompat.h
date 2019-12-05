@@ -46,7 +46,7 @@ struct SceneConstantBuffer
 
 struct Vertex {
 	XMFLOAT3 pos;
-	XMFLOAT4 color;
+	XMFLOAT3 color;
 };
 
 #endif // RAYTRACINGHLSLCOMPAT_H

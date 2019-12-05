@@ -22,6 +22,7 @@ namespace GlobalRootSignatureParams {
 		OutputViewSlot = 0,
 		AccelerationStructureSlot,
 		SceneConstantSlot,
+		VertexBuffersSlot,
 		Count,
 	};
 }
@@ -82,10 +83,13 @@ private:
 	RayGenConstantBuffer m_rayGenCB;
 
 	// Geometry
-	typedef UINT16 Index;
-	struct Vertex { float v1, v2, v3; };
-	ComPtr<ID3D12Resource> m_indexBuffer;
-	ComPtr<ID3D12Resource> m_vertexBuffer;
+	struct D3DBuffer {
+		ComPtr<ID3D12Resource> resource;
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptorHandle;
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptorHandle;
+	};
+	D3DBuffer m_indexBuffer;
+	D3DBuffer m_vertexBuffer;
 
 	// Acceleration structure
 	ComPtr<ID3D12Resource> m_accelerationStructure;
@@ -136,4 +140,6 @@ private:
 	SceneConstantBuffer _sceneCB[FrameCount];
 
 	void initializeScene();
+
+	UINT createBufferSRV(D3DBuffer *buffer, UINT numElements, UINT elementSize);
 };

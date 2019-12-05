@@ -110,7 +110,14 @@ void D3D12HelloTriangle::CreateRootSignatures()
 		UAVDescriptor.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // rangeType, numDescriptors, baseShaderRegister, registerSpace = 0
 		CD3DX12_ROOT_PARAMETER rootParameters[GlobalRootSignatureParams::Count];
 		rootParameters[GlobalRootSignatureParams::OutputViewSlot].InitAsDescriptorTable(1, &UAVDescriptor); // numDescriptorRanges, pDescriptorRanges
+		//SRV0
 		rootParameters[GlobalRootSignatureParams::AccelerationStructureSlot].InitAsShaderResourceView(0); // shaderRegister, registerSpace = 0
+
+		// SRV1, SRV2
+		CD3DX12_DESCRIPTOR_RANGE indexVertexDescriptor;
+		indexVertexDescriptor.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 1);
+		rootParameters[GlobalRootSignatureParams::VertexBuffersSlot].InitAsDescriptorTable(1, &indexVertexDescriptor);
+
 		// hlsl: ConstantBuffer<SceneConstantBuffer> g_sceneCB : register(b1);
 		rootParameters[GlobalRootSignatureParams::SceneConstantSlot].InitAsConstantBufferView(1, 0); //shaderRegister, registerSpace = 0
 		CD3DX12_ROOT_SIGNATURE_DESC globalRootSignatureDesc(ARRAYSIZE(rootParameters), rootParameters);
@@ -276,7 +283,7 @@ void D3D12HelloTriangle::BuildGeometry()
 	auto device = m_deviceResources->GetD3DDevice();
 	Index indices[] =
 	{
-		0, 1, 2
+		0, 1, 2, 0
 	};
 
 	float depthValue = 1.0;
@@ -286,13 +293,19 @@ void D3D12HelloTriangle::BuildGeometry()
 		// The sample raytraces in screen space coordinates.
 		// Since DirectX screen space coordinates are right handed (i.e. Y axis points down).
 		// Define the vertices in counter clockwise order ~ clockwise in left handed.
-		{ 0, offset, depthValue },
-		{ -offset, -offset, depthValue },
-		{ offset, -offset, depthValue }
+		{{ 0, offset, depthValue },				XMFLOAT3(1.0f, 0.0f, 0.0f)},
+		{{ -offset, -offset, depthValue },		XMFLOAT3(0.0f, 1.0f, 0.0f)},
+		{{ offset, -offset, depthValue },		XMFLOAT3(0.0f, 0.0f, 1.0f)},
 	};
 
-	AllocateUploadBuffer(device, vertices, sizeof(vertices), &m_vertexBuffer);
-	AllocateUploadBuffer(device, indices, sizeof(indices), &m_indexBuffer);
+	AllocateUploadBuffer(device, vertices, sizeof(vertices), &m_vertexBuffer.resource);
+	AllocateUploadBuffer(device, indices, sizeof(indices), &m_indexBuffer.resource);
+
+	// Vertex buffer is passed to the shader along with index buffer as a descriptor table.
+	// Vertex buffer descriptor must allow index buffer descriptor in the descriptor heap.
+	UINT descriptorIndexIB = createBufferSRV(&m_indexBuffer, sizeof(indices) / 4, 0);
+	UINT descriptorIndexVB = createBufferSRV(&m_vertexBuffer, ARRAYSIZE(vertices), sizeof(*vertices));
+	ThrowIfFalse(descriptorIndexVB == descriptorIndexIB + 1, L"Vertex Buffer descriptor index must follow that of Index Buffer descriptor index!");
 }
 
 void D3D12HelloTriangle::CreateConstantBuffers() {
@@ -332,13 +345,13 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 
 	D3D12_RAYTRACING_GEOMETRY_DESC geometryDesc = {};
 	geometryDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-	geometryDesc.Triangles.IndexBuffer = m_indexBuffer->GetGPUVirtualAddress();
-	geometryDesc.Triangles.IndexCount = static_cast<UINT>(m_indexBuffer->GetDesc().Width) / sizeof(Index);
+	geometryDesc.Triangles.IndexBuffer = m_indexBuffer.resource->GetGPUVirtualAddress();
+	geometryDesc.Triangles.IndexCount = static_cast<UINT>(m_indexBuffer.resource->GetDesc().Width) / sizeof(Index);
 	geometryDesc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
 	geometryDesc.Triangles.Transform3x4 = 0;
 	geometryDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-	geometryDesc.Triangles.VertexCount = static_cast<UINT>(m_vertexBuffer->GetDesc().Width) / sizeof(Vertex);
-	geometryDesc.Triangles.VertexBuffer.StartAddress = m_vertexBuffer->GetGPUVirtualAddress();
+	geometryDesc.Triangles.VertexCount = static_cast<UINT>(m_vertexBuffer.resource->GetDesc().Width) / sizeof(Vertex);
+	geometryDesc.Triangles.VertexBuffer.StartAddress = m_vertexBuffer.resource->GetGPUVirtualAddress();
 	geometryDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
 
 	// Mark the geometry as opaque. 
@@ -519,6 +532,13 @@ void D3D12HelloTriangle::DoRaytracing()
 		commandList->DispatchRays(dispatchDesc);
 	};
 
+	auto setCommonPiplineState = [&](ID3D12GraphicsCommandList *descriptorSetCL) {
+		descriptorSetCL->SetDescriptorHeaps(1, m_descriptorHeap.GetAddressOf());
+		//set index and successive vertex buffer descriptor tables
+		descriptorSetCL->SetComputeRootDescriptorTable(GlobalRootSignatureParams::VertexBuffersSlot, m_indexBuffer.gpuDescriptorHandle);
+		descriptorSetCL->SetComputeRootDescriptorTable(GlobalRootSignatureParams::OutputViewSlot, m_raytracingOutputResourceUAVGpuDescriptor);
+	};
+
 	commandList->SetComputeRootSignature(m_raytracingGlobalRootSignature.Get());
 
 	// Copy the updated Scene constant buffer to GPU
@@ -529,8 +549,7 @@ void D3D12HelloTriangle::DoRaytracing()
 
 	// Bind the heaps, acceleration structure and dispatch rays.    
 	D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
-	commandList->SetDescriptorHeaps(1, m_descriptorHeap.GetAddressOf());
-	commandList->SetComputeRootDescriptorTable(GlobalRootSignatureParams::OutputViewSlot, m_raytracingOutputResourceUAVGpuDescriptor);
+	setCommonPiplineState(commandList);
 	commandList->SetComputeRootShaderResourceView(GlobalRootSignatureParams::AccelerationStructureSlot, m_topLevelAccelerationStructure->GetGPUVirtualAddress());
 	DispatchRays(m_dxrCommandList.Get(), m_dxrStateObject.Get(), &dispatchDesc);
 }
@@ -610,8 +629,8 @@ void D3D12HelloTriangle::ReleaseDeviceDependentResources()
 	m_descriptorHeap.Reset();
 	m_descriptorsAllocated = 0;
 	m_raytracingOutputResourceUAVDescriptorHeapIndex = UINT_MAX;
-	m_indexBuffer.Reset();
-	m_vertexBuffer.Reset();
+	m_indexBuffer.resource.Reset();
+	m_vertexBuffer.resource.Reset();
 	_perFrameConstants.Reset();
 
 	m_accelerationStructure.Reset();
@@ -752,6 +771,35 @@ void D3D12HelloTriangle::initializeScene() {
 		updateCameraMatrices();
 	}
 
+}
+
+// Create SRV for a buffer
+UINT D3D12HelloTriangle::createBufferSRV(D3DBuffer *buffer, UINT numElements, UINT elementSize) {
+	auto device = m_deviceResources->GetD3DDevice();
+
+	//SRV
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Buffer.NumElements = numElements;
+	if (elementSize == 0)
+	{
+		srvDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+		srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+		srvDesc.Buffer.StructureByteStride = 0;
+	}
+	else
+	{
+		srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+		srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		srvDesc.Buffer.StructureByteStride = elementSize;
+	}
+
+	UINT descriptorIndex = AllocateDescriptor(&buffer->cpuDescriptorHandle);
+	device->CreateShaderResourceView(buffer->resource.Get(), &srvDesc, buffer->cpuDescriptorHandle);
+	buffer->gpuDescriptorHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(m_descriptorHeap->GetGPUDescriptorHandleForHeapStart(), descriptorIndex, m_descriptorSize);
+
+	return descriptorIndex;
 }
 
 
