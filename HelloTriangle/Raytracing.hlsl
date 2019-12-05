@@ -12,6 +12,7 @@
 #ifndef RAYTRACING_HLSL
 #define RAYTRACING_HLSL
 
+#define HLSL
 #include "RaytracingHlslCompat.h"
 
 //Shader resources (SRV) correspond to the letter t.
@@ -36,6 +37,10 @@ bool IsInsideViewport(float2 p, Viewport viewport)
 [shader("raygeneration")]
 void MyRaygenShader()
 {
+	/*
+		DispatchRaysDimensions():	uint3(width, height, depth) values
+		DispatchRaysIndex(): Gets the current x and y location within the width and height obtained with DispatchRaysDimensions() system value intrinsic.
+	*/
 	float2 lerpValues = (float2)DispatchRaysIndex() / (float2)DispatchRaysDimensions();
 
 	// Orthographic projection since we're raytracing in screen space.
@@ -93,7 +98,13 @@ void MyClosestHitShader(inout RayPayload payload, in MyAttributes attr)
 [shader("miss")]
 void MyMissShader(inout RayPayload payload)
 {
-	payload.color = float4(0, 0, 0, 1);
+	//payload.color = float4(0, 0, 0, 1);
+
+	uint2 launchIndex = DispatchRaysIndex();
+	float2 dims = (float2)DispatchRaysDimensions();
+	float ramp = launchIndex.y / dims.y;
+	
+	payload.color = float4(0.0, 0.2f, 0.7f - 0.3f * ramp, -1.0f);
 }
 
 #endif // RAYTRACING_HLSL

@@ -17,6 +17,7 @@
 
 using namespace std;
 using namespace DX;
+using namespace DirectX;
 
 const wchar_t* D3D12HelloTriangle::c_hitGroupName = L"MyHitGroup";
 const wchar_t* D3D12HelloTriangle::c_raygenShaderName = L"MyRaygenShader";
@@ -80,6 +81,9 @@ void D3D12HelloTriangle::CreateDeviceDependentResources()
 	// Build raytracing acceleration structures from the generated geometry.
 	BuildAccelerationStructures();
 
+	// Create constant buffers for the geometry and scene.
+	CreateConstantBuffers();
+
 	// Build shader tables, which define shaders and their local root arguments.
 	BuildShaderTables();
 
@@ -103,10 +107,11 @@ void D3D12HelloTriangle::CreateRootSignatures()
 	// This is a root signature that is shared across all raytracing shaders invoked during a DispatchRays() call.
 	{
 		CD3DX12_DESCRIPTOR_RANGE UAVDescriptor;
-		UAVDescriptor.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+		UAVDescriptor.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // rangeType, numDescriptors, baseShaderRegister, registerSpace = 0
 		CD3DX12_ROOT_PARAMETER rootParameters[GlobalRootSignatureParams::Count];
-		rootParameters[GlobalRootSignatureParams::OutputViewSlot].InitAsDescriptorTable(1, &UAVDescriptor);
-		rootParameters[GlobalRootSignatureParams::AccelerationStructureSlot].InitAsShaderResourceView(0);
+		rootParameters[GlobalRootSignatureParams::OutputViewSlot].InitAsDescriptorTable(1, &UAVDescriptor); // numDescriptorRanges, pDescriptorRanges
+		rootParameters[GlobalRootSignatureParams::AccelerationStructureSlot].InitAsShaderResourceView(0); // shaderRegister, registerSpace = 0
+		rootParameters[GlobalRootSignatureParams::SceneConstantSlot].InitAsConstantBufferView(0); //shaderRegister, registerSpace = 0
 		CD3DX12_ROOT_SIGNATURE_DESC globalRootSignatureDesc(ARRAYSIZE(rootParameters), rootParameters);
 		SerializeAndCreateRaytracingRootSignature(globalRootSignatureDesc, &m_raytracingGlobalRootSignature);
 	}
@@ -115,7 +120,7 @@ void D3D12HelloTriangle::CreateRootSignatures()
 	// This is a root signature that enables a shader to have unique arguments that come from shader tables.
 	{
 		CD3DX12_ROOT_PARAMETER rootParameters[LocalRootSignatureParams::Count];
-		rootParameters[LocalRootSignatureParams::ViewportConstantSlot].InitAsConstants(SizeOfInUint32(m_rayGenCB), 0, 0);
+		rootParameters[LocalRootSignatureParams::ViewportConstantSlot].InitAsConstants(SizeOfInUint32(m_rayGenCB), 0, 0); //num32BitValues, shaderRegister, registerSpace = 0
 		CD3DX12_ROOT_SIGNATURE_DESC localRootSignatureDesc(ARRAYSIZE(rootParameters), rootParameters);
 		localRootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
 		SerializeAndCreateRaytracingRootSignature(localRootSignatureDesc, &m_raytracingLocalRootSignature);
@@ -288,6 +293,30 @@ void D3D12HelloTriangle::BuildGeometry()
 	AllocateUploadBuffer(device, indices, sizeof(indices), &m_indexBuffer);
 }
 
+void D3D12HelloTriangle::CreateConstantBuffers() {
+	auto device = m_deviceResources->GetD3DDevice();
+	auto frameCount = m_deviceResources->GetBackBufferCount();
+
+	// Create the constant buffer memory and map the CPU and GPU address
+	const D3D12_HEAP_PROPERTIES uploadHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+
+	// Allocate one constant buffer per frame, since it gets updated every frame.
+	size_t cbSize = frameCount * sizeof(AlignedSceneConstantBuffer);
+	const D3D12_RESOURCE_DESC constantBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+
+	ThrowIfFailed(device->CreateCommittedResource(
+		&uploadHeapProperties,
+		D3D12_HEAP_FLAG_NONE,
+		&constantBufferDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr, IID_PPV_ARGS(&_perFrameConstants)));
+
+	// Map the constant buffer and cache its heap pointers
+	// We don't unmap this until the app closes. Keeping buffer mapped for the lifetime of resource is okay.
+	//CD3DX12_RANGE readRange(0, 0); // We do not intend to read from this resource on the GPU.
+	ThrowIfFailed(_perFrameConstants->Map(0, nullptr, reinterpret_cast<void **>(&_mappedConstantData)));
+}
+
 // Build acceleration structures needed for raytracing.
 void D3D12HelloTriangle::BuildAccelerationStructures()
 {
@@ -458,11 +487,17 @@ void D3D12HelloTriangle::OnUpdate()
 {
 	m_timer.Tick();
 	CalculateFrameStats();
+
+	// upate camera
+	{
+		updateCameraMatrices();
+	}
 }
 
 void D3D12HelloTriangle::DoRaytracing()
 {
 	auto commandList = m_deviceResources->GetCommandList();
+	auto frameIndex = m_deviceResources->GetCurrentFrameIndex();
 
 	auto DispatchRays = [&](auto* commandList, auto* stateObject, auto* dispatchDesc)
 	{
@@ -483,6 +518,12 @@ void D3D12HelloTriangle::DoRaytracing()
 	};
 
 	commandList->SetComputeRootSignature(m_raytracingGlobalRootSignature.Get());
+
+	// Copy the updated Scene constant buffer to GPU
+	SceneConstantBuffer &currentSceneCB = _sceneCB[frameIndex];
+	memcpy(&_mappedConstantData[frameIndex].constants, &currentSceneCB, sizeof(currentSceneCB));
+	auto cbGpuAddress = _perFrameConstants->GetGPUVirtualAddress() + frameIndex * sizeof(*_mappedConstantData);
+	commandList->SetComputeRootConstantBufferView(GlobalRootSignatureParams::SceneConstantSlot, cbGpuAddress);
 
 	// Bind the heaps, acceleration structure and dispatch rays.    
 	D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
@@ -569,6 +610,7 @@ void D3D12HelloTriangle::ReleaseDeviceDependentResources()
 	m_raytracingOutputResourceUAVDescriptorHeapIndex = UINT_MAX;
 	m_indexBuffer.Reset();
 	m_vertexBuffer.Reset();
+	_perFrameConstants.Reset();
 
 	m_accelerationStructure.Reset();
 	m_bottomLevelAccelerationStructure.Reset();
@@ -679,3 +721,35 @@ UINT D3D12HelloTriangle::AllocateDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpuDesc
 	*cpuDescriptor = CD3DX12_CPU_DESCRIPTOR_HANDLE(descriptorHeapCpuBase, descriptorIndexToUse, m_descriptorSize);
 	return descriptorIndexToUse;
 }
+
+// #DXR
+void D3D12HelloTriangle::updateCameraMatrices() {
+	auto frameIndex = m_deviceResources->GetCurrentFrameIndex();
+
+	XMVECTOR eyePos = XMVectorSet(1.5f, 1.5f, 1.5f, 0.0f);
+	XMVECTOR lookAtPos = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	XMVECTOR upDirection = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+	_sceneCB[frameIndex].cameraPosition = eyePos;
+		// convert to radians
+	float fovAngleY = 45.0f * XM_PI / 180.0f;
+
+	XMMATRIX view = XMMatrixLookAtRH(eyePos, lookAtPos, upDirection);
+	XMMATRIX proj = XMMatrixPerspectiveFovRH(fovAngleY, m_aspectRatio, 0.1f, 1000.0f);
+	XMMATRIX viewProj = view * proj;
+
+	// Raytracing has to do the contrary of rasterization: rays are defined in camera space, and are transformed into world space.
+	// To do this, we need store the inverse matrices as well.
+	_sceneCB[frameIndex].projectionToWorld = XMMatrixInverse(nullptr, viewProj);
+}
+
+void D3D12HelloTriangle::initializeScene() {
+
+	// setup Camera
+	{
+		updateCameraMatrices();
+	}
+
+}
+
+

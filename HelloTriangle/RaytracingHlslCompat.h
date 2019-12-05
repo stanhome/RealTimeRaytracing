@@ -12,6 +12,15 @@
 #ifndef RAYTRACINGHLSLCOMPAT_H
 #define RAYTRACINGHLSLCOMPAT_H
 
+#ifdef HLSL
+// using in shader
+#include "HlslCompat.h"
+#else
+
+using namespace DirectX;
+
+#endif
+
 struct Viewport
 {
 	float left;
@@ -24,6 +33,12 @@ struct RayGenConstantBuffer
 {
 	Viewport viewport;
 	Viewport stencil;
+};
+
+struct SceneConstantBuffer
+{
+	XMMATRIX projectionToWorld;
+	XMVECTOR cameraPosition;
 };
 
 #endif // RAYTRACINGHLSLCOMPAT_H

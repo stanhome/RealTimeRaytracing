@@ -21,7 +21,8 @@ namespace GlobalRootSignatureParams {
 	enum Value {
 		OutputViewSlot = 0,
 		AccelerationStructureSlot,
-		Count
+		Count,
+		SceneConstantSlot,
 	};
 }
 
@@ -52,6 +53,16 @@ public:
 private:
 
 	static const UINT FrameCount = 3;
+
+	// We'll allocate space for serveral of these  and the will need to padded for alignment.
+	static_assert(sizeof(SceneConstantBuffer) < D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT, "Checking the size here");
+
+	union AlignedSceneConstantBuffer {
+		SceneConstantBuffer constants;
+		uint8_t alignmentPadding[D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT];
+	};
+	AlignedSceneConstantBuffer *_mappedConstantData;
+	ComPtr<ID3D12Resource> _perFrameConstants;
 
 	// DirectX Raytracing (DXR) attributes
 	ComPtr<ID3D12Device5> m_dxrDevice;
@@ -112,10 +123,17 @@ private:
 	void CreateDescriptorHeap();
 	void CreateRaytracingOutputResource();
 	void BuildGeometry();
+	void CreateConstantBuffers();
 	void BuildAccelerationStructures();
 	void BuildShaderTables();
 	void UpdateForSizeChange(UINT clientWidth, UINT clientHeight);
 	void CopyRaytracingOutputToBackbuffer();
 	void CalculateFrameStats();
 	UINT AllocateDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpuDescriptor, UINT descriptorIndexToUse = UINT_MAX);
+
+	// #DXR Extra: Perspective Camera
+	void updateCameraMatrices();
+	SceneConstantBuffer _sceneCB[FrameCount];
+
+	void initializeScene();
 };

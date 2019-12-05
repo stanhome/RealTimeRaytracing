@@ -149,6 +149,8 @@ void DefineExports(T* obj, LPCWSTR(&Exports)[N][M])
 
 inline void AllocateUploadBuffer(ID3D12Device* pDevice, void *pData, UINT64 datasize, ID3D12Resource **ppResource, const wchar_t* resourceName = nullptr)
 {
+	// D3D12_HEAP_TYPE_DEFAULT: This heap type experiences the most bandwidth for the GPU, but cannot provide CPU access.
+	// D3D12_HEAP_TYPE_UPLOAD: Specifies a heap used for uploading. This heap type has CPU access optimized for uploading to the GPU
     auto uploadHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(datasize);
     ThrowIfFailed(pDevice->CreateCommittedResource(
