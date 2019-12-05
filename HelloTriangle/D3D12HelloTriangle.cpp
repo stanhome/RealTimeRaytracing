@@ -111,7 +111,8 @@ void D3D12HelloTriangle::CreateRootSignatures()
 		CD3DX12_ROOT_PARAMETER rootParameters[GlobalRootSignatureParams::Count];
 		rootParameters[GlobalRootSignatureParams::OutputViewSlot].InitAsDescriptorTable(1, &UAVDescriptor); // numDescriptorRanges, pDescriptorRanges
 		rootParameters[GlobalRootSignatureParams::AccelerationStructureSlot].InitAsShaderResourceView(0); // shaderRegister, registerSpace = 0
-		rootParameters[GlobalRootSignatureParams::SceneConstantSlot].InitAsConstantBufferView(0); //shaderRegister, registerSpace = 0
+		// hlsl: ConstantBuffer<SceneConstantBuffer> g_sceneCB : register(b1);
+		rootParameters[GlobalRootSignatureParams::SceneConstantSlot].InitAsConstantBufferView(1, 0); //shaderRegister, registerSpace = 0
 		CD3DX12_ROOT_SIGNATURE_DESC globalRootSignatureDesc(ARRAYSIZE(rootParameters), rootParameters);
 		SerializeAndCreateRaytracingRootSignature(globalRootSignatureDesc, &m_raytracingGlobalRootSignature);
 	}
@@ -120,6 +121,7 @@ void D3D12HelloTriangle::CreateRootSignatures()
 	// This is a root signature that enables a shader to have unique arguments that come from shader tables.
 	{
 		CD3DX12_ROOT_PARAMETER rootParameters[LocalRootSignatureParams::Count];
+		// hlsl: ConstantBuffer<RayGenConstantBuffer> g_rayGenCB : register(b0);
 		rootParameters[LocalRootSignatureParams::ViewportConstantSlot].InitAsConstants(SizeOfInUint32(m_rayGenCB), 0, 0); //num32BitValues, shaderRegister, registerSpace = 0
 		CD3DX12_ROOT_SIGNATURE_DESC localRootSignatureDesc(ARRAYSIZE(rootParameters), rootParameters);
 		localRootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
@@ -284,9 +286,9 @@ void D3D12HelloTriangle::BuildGeometry()
 		// The sample raytraces in screen space coordinates.
 		// Since DirectX screen space coordinates are right handed (i.e. Y axis points down).
 		// Define the vertices in counter clockwise order ~ clockwise in left handed.
-		{ 0, -offset, depthValue },
-		{ -offset, offset, depthValue },
-		{ offset, offset, depthValue }
+		{ 0, offset, depthValue },
+		{ -offset, -offset, depthValue },
+		{ offset, -offset, depthValue }
 	};
 
 	AllocateUploadBuffer(device, vertices, sizeof(vertices), &m_vertexBuffer);

@@ -19,6 +19,9 @@
 
 using namespace DirectX;
 
+
+// shader will use byte encoding to access indices.
+typedef UINT16 Index;
 #endif
 
 struct Viewport
@@ -39,6 +42,11 @@ struct SceneConstantBuffer
 {
 	XMMATRIX projectionToWorld;
 	XMVECTOR cameraPosition;
+};
+
+struct Vertex {
+	XMFLOAT3 pos;
+	XMFLOAT4 color;
 };
 
 #endif // RAYTRACINGHLSLCOMPAT_H

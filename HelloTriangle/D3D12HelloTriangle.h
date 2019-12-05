@@ -21,8 +21,8 @@ namespace GlobalRootSignatureParams {
 	enum Value {
 		OutputViewSlot = 0,
 		AccelerationStructureSlot,
-		Count,
 		SceneConstantSlot,
+		Count,
 	};
 }
 
