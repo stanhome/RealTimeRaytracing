@@ -84,11 +84,8 @@ inline void GenerateCameraRay(uint2 index, out float3 origin, out float3 directi
 	float4 world = mul(float4(screenPos, 0, 1), g_sceneCB.projectionToWorld);
 	world.xyz /= world.w;
 
-	//origin = g_sceneCB.cameraPosition.xyz;
-	//direction = normalize(world.xyz - origin);
-
-	origin = (0, 0, 0);
-	direction = float3(screenPos.x, screenPos.y, 1);
+	origin = g_sceneCB.cameraPosition.xyz;
+	direction = normalize(world.xyz - origin);
 }
 
 
@@ -116,8 +113,10 @@ void MyRaygenShader()
 	ray.TMax = 10000.0;
 	RayPayload payload = { float4(0, 0, 0, 0) };
 
-	//RAY_FLAG_CULL_BACK_FACING_TRIANGLES : Enables culling of back facing triangle
 	/*
+	RAY_FLAG_NONE : None
+	RAY_FLAG_CULL_BACK_FACING_TRIANGLES : Enables culling of back facing triangle
+
 	Template<payload_t>
 void TraceRay(RaytracingAccelerationStructure AccelerationStructure,
             uint RayFlags,
@@ -128,7 +127,7 @@ void TraceRay(RaytracingAccelerationStructure AccelerationStructure,
             RayDesc Ray,
             inout payload_t Payload);
 	*/
-	TraceRay(SceneBVH, RAY_FLAG_NONE, ~0, 0, 0, 0, ray, payload);
+	TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 0, 0, ray, payload);
 
 	// Write the raytraced color to the output texture.
 	RenderTarget[DispatchRaysIndex().xy] = payload.color;

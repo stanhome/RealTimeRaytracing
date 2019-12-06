@@ -286,8 +286,8 @@ void D3D12HelloTriangle::BuildGeometry()
 		0, 1, 2, 0
 	};
 
-	float depthValue = 1.0;
-	float offset = 0.7f;
+	float depthValue = 0.0;
+	float offset = 0.02f;
 	Vertex vertices[] =
 	{
 		// The sample raytraces in screen space coordinates.
@@ -747,8 +747,8 @@ UINT D3D12HelloTriangle::AllocateDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpuDesc
 void D3D12HelloTriangle::updateCameraMatrices() {
 	auto frameIndex = m_deviceResources->GetCurrentFrameIndex();
 
-	XMVECTOR eyePos = XMVectorSet(1.5f, 1.5f, 1.5f, 0.0f);
-	XMVECTOR lookAtPos = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	XMVECTOR eyePos = XMVectorSet(0.f, 0.f, 10.f, 0.0f);
+	XMVECTOR lookAtPos = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
 	XMVECTOR upDirection = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
 	_sceneCB[frameIndex].cameraPosition = eyePos;
