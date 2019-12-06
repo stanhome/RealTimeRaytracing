@@ -51,6 +51,9 @@ public:
 	virtual void OnDestroy();
 	virtual IDXGISwapChain* GetSwapchain() { return m_deviceResources->GetSwapChain(); }
 
+	virtual void onMouseMoveOriginal(UINT8 wParam, UINT32 lParam) override;
+	virtual void onLeftButtonDownOriginal(UINT32 lParam) override;
+
 private:
 
 	static const UINT FrameCount = 3;

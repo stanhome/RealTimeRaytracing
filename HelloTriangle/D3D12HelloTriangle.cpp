@@ -10,9 +10,14 @@
 //*********************************************************
 
 #include "stdafx.h"
+#include <algorithm>
 #include "D3D12HelloTriangle.h"
 #include "DirectXRaytracingHelper.h"
 #include "CompiledShaders\Raytracing.hlsl.h"
+#include "glm/gtc/type_ptr.hpp"
+#include "manipulator.h"
+#include "Windowsx.h"
+
 
 
 using namespace std;
@@ -34,6 +39,9 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
 
 void D3D12HelloTriangle::OnInit()
 {
+	nv_helpers_dx12::CameraManip.setWindowSize(GetWidth(), GetHeight());
+	nv_helpers_dx12::CameraManip.setLookat(glm::vec3(0.f, 0.f, 5.f), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+
 	m_deviceResources = std::make_unique<DeviceResources>(
 		DXGI_FORMAT_R8G8B8A8_UNORM,
 		DXGI_FORMAT_UNKNOWN,
@@ -380,7 +388,7 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 	ThrowIfFalse(bottomLevelPrebuildInfo.ResultDataMaxSizeInBytes > 0);
 
 	ComPtr<ID3D12Resource> scratchResource;
-	AllocateUAVBuffer(device, max(topLevelPrebuildInfo.ScratchDataSizeInBytes, bottomLevelPrebuildInfo.ScratchDataSizeInBytes), &scratchResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, L"ScratchResource");
+	AllocateUAVBuffer(device, std::max(topLevelPrebuildInfo.ScratchDataSizeInBytes, bottomLevelPrebuildInfo.ScratchDataSizeInBytes), &scratchResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, L"ScratchResource");
 
 	// Allocate resources for acceleration structures.
 	// Acceleration structures can only be placed in resources that are created in the default heap (or custom heap equivalent). 
@@ -539,6 +547,7 @@ void D3D12HelloTriangle::DoRaytracing()
 		descriptorSetCL->SetComputeRootDescriptorTable(GlobalRootSignatureParams::OutputViewSlot, m_raytracingOutputResourceUAVGpuDescriptor);
 	};
 
+
 	commandList->SetComputeRootSignature(m_raytracingGlobalRootSignature.Get());
 
 	// Copy the updated Scene constant buffer to GPU
@@ -688,6 +697,34 @@ void D3D12HelloTriangle::OnDeviceRestored()
 	CreateWindowSizeDependentResources();
 }
 
+void D3D12HelloTriangle::onLeftButtonDownOriginal(UINT32 lParam) {
+	nv_helpers_dx12::CameraManip.setMousePosition(-GET_X_LPARAM(lParam), -GET_Y_LPARAM(lParam));
+}
+
+void D3D12HelloTriangle::onMouseMoveOriginal(UINT8 wParam, UINT32 lParam) {
+	using nv_helpers_dx12::Manipulator;
+	Manipulator::Inputs inputs;
+
+	inputs.lmb = wParam & MK_LBUTTON;
+
+	if (!inputs.lmb)
+	{
+		return; // no mouse button pressed
+	}
+
+	inputs.ctrl = GetAsyncKeyState(VK_CONTROL);
+	inputs.shift = GetAsyncKeyState(VK_SHIFT);
+	inputs.alt = GetAsyncKeyState(VK_MENU);
+
+	if (inputs.ctrl)
+	{
+		OutputDebugStringA("ctrl\n");
+	}
+
+	CameraManip.mouseMove(-(int)GET_X_LPARAM(lParam), -(int)GET_Y_LPARAM(lParam), inputs);
+}
+
+
 // Compute the average frames per second and million rays per second.
 void D3D12HelloTriangle::CalculateFrameStats()
 {
@@ -747,15 +784,24 @@ UINT D3D12HelloTriangle::AllocateDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpuDesc
 void D3D12HelloTriangle::updateCameraMatrices() {
 	auto frameIndex = m_deviceResources->GetCurrentFrameIndex();
 
-	XMVECTOR eyePos = XMVectorSet(0.f, 0.f, 10.f, 0.0f);
-	XMVECTOR lookAtPos = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-	XMVECTOR upDirection = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	glm::vec3 eye, lookAtPos, up;
+	nv_helpers_dx12::CameraManip.getLookat(eye, lookAtPos, up);
 
-	_sceneCB[frameIndex].cameraPosition = eyePos;
+	_sceneCB[frameIndex].cameraPosition = XMVectorSet(eye.x, eye.y, eye.z, 0.0f);;
 		// convert to radians
 	float fovAngleY = 45.0f * XM_PI / 180.0f;
 
-	XMMATRIX view = XMMatrixLookAtRH(eyePos, lookAtPos, upDirection);
+
+	XMMATRIX view;
+
+	//const glm::mat4 &mat = nv_helpers_dx12::CameraManip.getMatrix();
+	//memcpy(&view, glm::value_ptr(mat), 16 * sizeof(float));
+
+	view = XMMatrixLookAtRH(XMVectorSet(eye.x, eye.y, eye.z, 0.0f),
+		XMVectorSet(lookAtPos.x, lookAtPos.y, lookAtPos.z, 0.0f),
+		XMVectorSet(up.x, up.y, up.z, 0.0f));
+
+
 	XMMATRIX proj = XMMatrixPerspectiveFovRH(fovAngleY, m_aspectRatio, 0.1f, 1000.0f);
 	XMMATRIX viewProj = view * proj;
 
