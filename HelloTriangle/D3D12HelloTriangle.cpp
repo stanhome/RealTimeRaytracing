@@ -382,10 +382,14 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 	ThrowIfFalse(topLevelPrebuildInfo.ResultDataMaxSizeInBytes > 0);
 
 	// Get required sizes for a bottom level acceleration structure.
-	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottomLevelPrebuildInfo = {};
-	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS bottomLevelInputs = topLevelInputs;
-	bottomLevelInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS bottomLevelInputs = {};
+	bottomLevelInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
 	bottomLevelInputs.pGeometryDescs = &geometryDesc;
+	bottomLevelInputs.Flags = buildFlags;
+	bottomLevelInputs.NumDescs = _triangleGemotryCount;
+	bottomLevelInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+
+	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottomLevelPrebuildInfo = {};
 	m_dxrDevice->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelInputs, &bottomLevelPrebuildInfo);
 	ThrowIfFalse(bottomLevelPrebuildInfo.ResultDataMaxSizeInBytes > 0);
 
@@ -424,6 +428,8 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 	// Just one instance for now
 	_instances = {
 		{m_bottomLevelAccelerationStructure, XMMatrixIdentity()},
+		//{m_bottomLevelAccelerationStructure, XMMatrixTranslation(-.6f, 0, 0)},
+		//{m_bottomLevelAccelerationStructure, XMMatrixTranslation(.6f, 0, 0)},
 	};
 
 	// Create an instance desc for the bottom-level acceleration structure.
