@@ -40,7 +40,7 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
 void D3D12HelloTriangle::OnInit()
 {
 	nv_helpers_dx12::CameraManip.setWindowSize(GetWidth(), GetHeight());
-	nv_helpers_dx12::CameraManip.setLookat(glm::vec3(0.f, 0.f, 5.f), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+	nv_helpers_dx12::CameraManip.setLookat(glm::vec3(0.f, 0.f, 10.f), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
 
 	m_deviceResources = std::make_unique<DeviceResources>(
 		DXGI_FORMAT_R8G8B8A8_UNORM,
@@ -428,8 +428,8 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 	// Just one instance for now
 	_instances = {
 		{m_bottomLevelAccelerationStructure, XMMatrixIdentity()},
-		//{m_bottomLevelAccelerationStructure, XMMatrixTranslation(-.6f, 0, 0)},
-		//{m_bottomLevelAccelerationStructure, XMMatrixTranslation(.6f, 0, 0)},
+		{m_bottomLevelAccelerationStructure, XMMatrixTranslation(-.05f, 0, -1)},
+		{m_bottomLevelAccelerationStructure, XMMatrixTranslation(.05f, 0, -1)},
 	};
 
 	// Create an instance desc for the bottom-level acceleration structure.
@@ -846,7 +846,7 @@ void D3D12HelloTriangle::updateCameraMatrices() {
 
 	_sceneCB[frameIndex].cameraPosition = XMVectorSet(eye.x, eye.y, eye.z, 0.0f);;
 		// convert to radians
-	float fovAngleY = 45.0f * XM_PI / 180.0f;
+	float fovAngleY = 90.0f * XM_PI / 180.0f;
 
 
 	XMMATRIX view;

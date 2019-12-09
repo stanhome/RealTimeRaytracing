@@ -113,7 +113,7 @@ private:
 	ComPtr<ID3D12Resource> m_accelerationStructure;
 	ComPtr<ID3D12Resource> m_bottomLevelAccelerationStructure;
 	UINT _triangleGemotryCount = 1; // bottom level NumDescs
-	UINT _instanceCount = 1; // top level NumDescs
+	UINT _instanceCount = 3; // top level NumDescs
 	std::vector<std::pair<ComPtr<ID3D12Resource>, DirectX::XMMATRIX>> _instances;
 	ComPtr<ID3D12Resource> m_topLevelAccelerationStructure;
 
