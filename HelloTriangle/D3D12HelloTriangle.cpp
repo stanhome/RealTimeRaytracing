@@ -368,18 +368,20 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 	// optimize for AnyHit shader
 	geometryDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
 
-	// Get required sizes for an acceleration structure.
+
+	// Get required size for a top level acceleration structure
 	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS buildFlags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS topLevelInputs = {};
 	topLevelInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
 	topLevelInputs.Flags = buildFlags;
-	topLevelInputs.NumDescs = 1;
+	topLevelInputs.NumDescs = _instanceCount;
 	topLevelInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
 
 	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO topLevelPrebuildInfo = {};
 	m_dxrDevice->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelInputs, &topLevelPrebuildInfo);
 	ThrowIfFalse(topLevelPrebuildInfo.ResultDataMaxSizeInBytes > 0);
 
+	// Get required sizes for a bottom level acceleration structure.
 	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottomLevelPrebuildInfo = {};
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS bottomLevelInputs = topLevelInputs;
 	bottomLevelInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
@@ -404,14 +406,6 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 		AllocateUAVBuffer(device, topLevelPrebuildInfo.ResultDataMaxSizeInBytes, &m_topLevelAccelerationStructure, initialResourceState, L"TopLevelAccelerationStructure");
 	}
 
-	// Create an instance desc for the bottom-level acceleration structure.
-	ComPtr<ID3D12Resource> instanceDescs;
-	D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
-	instanceDesc.Transform[0][0] = instanceDesc.Transform[1][1] = instanceDesc.Transform[2][2] = 1;
-	instanceDesc.InstanceMask = 1;
-	instanceDesc.AccelerationStructure = m_bottomLevelAccelerationStructure->GetGPUVirtualAddress();
-	AllocateUploadBuffer(device, &instanceDesc, sizeof(instanceDesc), &instanceDescs, L"InstanceDescs");
-
 	// Bottom Level Acceleration Structure desc
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bottomLevelBuildDesc = {};
 	{
@@ -419,6 +413,65 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 		bottomLevelBuildDesc.ScratchAccelerationStructureData = scratchResource->GetGPUVirtualAddress();
 		bottomLevelBuildDesc.DestAccelerationStructureData = m_bottomLevelAccelerationStructure->GetGPUVirtualAddress();
 	}
+
+	m_dxrCommandList->BuildRaytracingAccelerationStructure(&bottomLevelBuildDesc, 0, nullptr);
+	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(m_bottomLevelAccelerationStructure.Get()));
+
+
+	/*
+	Top Level Acceleration structure.
+	*/
+	// Just one instance for now
+	_instances = {
+		{m_bottomLevelAccelerationStructure, XMMatrixIdentity()},
+	};
+
+	// Create an instance desc for the bottom-level acceleration structure.
+	ComPtr<ID3D12Resource> instanceDescs; // descriptors buffer
+
+	{
+		//vector<AccelerationStructureInstance> instances;
+		//for (size_t i = 0; i < _bottomLevelInstances.size(); i++)
+		//{
+		//	instances.emplace_back(_bottomLevelInstances[i].first.Get(), _bottomLevelInstances[i].second,
+		//		static_cast<UINT>(i), static_cast<UINT>(0));
+		//}
+
+		// old only one instance
+		//D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
+		//instanceDesc.Transform[0][0] = instanceDesc.Transform[1][1] = instanceDesc.Transform[2][2] = 1;
+		//instanceDesc.InstanceMask = 0xFF;
+		//instanceDesc.AccelerationStructure = m_bottomLevelAccelerationStructure->GetGPUVirtualAddress();
+
+		// changed by Stan: support multiple instance
+
+		UINT instanceCount = static_cast<UINT>(_instances.size());
+
+		UINT64 instanceDescsSizeInBytes = ROUND_UP(sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * instanceCount, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+
+		D3D12_RAYTRACING_INSTANCE_DESC *instanceDescArray = (D3D12_RAYTRACING_INSTANCE_DESC *)malloc(instanceDescsSizeInBytes);
+		//ZeroMemory(instanceDescArray, instanceDescsSizeInBytes);
+
+		// create the description for each instance
+		for (UINT i = 0; i <instanceCount; ++i)
+		{
+			D3D12_RAYTRACING_INSTANCE_DESC &desc = instanceDescArray[i];
+			// Instance ID visible in the shader in InstanceID()
+			desc.InstanceID = i;
+			// index of the hit group invoked upon intersection
+			desc.InstanceContributionToHitGroupIndex = static_cast<UINT>(0);
+			// Instance flags, including backface culling, winding, etc.
+			desc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+			desc.AccelerationStructure = _instances[i].first->GetGPUVirtualAddress();
+			// Visibility mask, always visible here.
+			desc.InstanceMask = 0xFF;
+			XMStoreFloat3x4(reinterpret_cast<XMFLOAT3X4 *>(desc.Transform), _instances[i].second);
+		}
+
+		//AllocateUploadBuffer(device, &instanceDesc, 256, &instanceDescs, L"InstanceDescs");
+		AllocateUploadBuffer(device, instanceDescArray, instanceDescsSizeInBytes, &instanceDescs, L"InstanceDescs");
+	}
+
 
 	// Top Level Acceleration Structure desc
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC topLevelBuildDesc = {};
@@ -429,15 +482,13 @@ void D3D12HelloTriangle::BuildAccelerationStructures()
 		topLevelBuildDesc.ScratchAccelerationStructureData = scratchResource->GetGPUVirtualAddress();
 	}
 
-	auto BuildAccelerationStructure = [&](auto* raytracingCommandList)
+	auto BuildTopLevelAccelerationStructure = [&](auto* raytracingCommandList)
 	{
-		raytracingCommandList->BuildRaytracingAccelerationStructure(&bottomLevelBuildDesc, 0, nullptr);
-		commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(m_bottomLevelAccelerationStructure.Get()));
 		raytracingCommandList->BuildRaytracingAccelerationStructure(&topLevelBuildDesc, 0, nullptr);
 	};
 
 	// Build acceleration structure.
-	BuildAccelerationStructure(m_dxrCommandList.Get());
+	BuildTopLevelAccelerationStructure(m_dxrCommandList.Get());
 
 	// Kick off acceleration structure construction.
 	m_deviceResources->ExecuteCommandList();

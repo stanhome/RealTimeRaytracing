@@ -94,9 +94,26 @@ private:
 	D3DBuffer m_indexBuffer;
 	D3DBuffer m_vertexBuffer;
 
+	// added by stan
 	// Acceleration structure
+	//struct AccelerationStructureInstance {
+	//	// Bottom-level AS
+	//	ID3D12Resource *bottomLevelAS;
+	//	// transform matrix
+	//	const DirectX::XMMATRIX &transform;
+	//	// instance id visible in the shader
+	//	UINT instanceId;
+	//	// hit group index used to fetch the shaders from the SBT
+	//	UINT hitGroupIndex;
+
+	//	AccelerationStructureInstance(ID3D12Resource *blAS, const DirectX::XMMATRIX &t, UINT iId, UINT hgId)
+	//		: bottomLevelAS(blAS), transform(t), instanceId(iId), hitGroupIndex(hgId) {};
+	//};
+
 	ComPtr<ID3D12Resource> m_accelerationStructure;
 	ComPtr<ID3D12Resource> m_bottomLevelAccelerationStructure;
+	UINT _instanceCount = 1;
+	std::vector<std::pair<ComPtr<ID3D12Resource>, DirectX::XMMATRIX>> _instances;
 	ComPtr<ID3D12Resource> m_topLevelAccelerationStructure;
 
 	// Raytracing output

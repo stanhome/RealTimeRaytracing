@@ -11,6 +11,15 @@
 
 #pragma once
 
+//added by stan
+
+// Helper to compute aligned buffer sizes
+#ifndef ROUND_UP
+#define ROUND_UP(v, powerOf2Alignment) (((v) + (powerOf2Alignment)-1) & ~((powerOf2Alignment)-1))
+#endif
+
+// added by stan end.
+
 #define SizeOfInUint32(obj) ((sizeof(obj) - 1) / sizeof(UINT32) + 1)
 
 struct AccelerationStructureBuffers
