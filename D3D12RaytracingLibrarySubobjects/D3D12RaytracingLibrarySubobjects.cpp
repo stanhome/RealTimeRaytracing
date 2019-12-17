@@ -391,7 +391,7 @@ void D3D12RaytracingLibrarySubobjects::BuildGeometry()
 	};
 
 	float depthValue = 0.0;
-	float offset = 1.f;
+	float offset = 2.f;
 	Vertex vertices[] =
 	{
 		// The sample raytraces in screen space coordinates.
@@ -400,11 +400,6 @@ void D3D12RaytracingLibrarySubobjects::BuildGeometry()
 		{{ 0, offset, depthValue },				XMFLOAT3(1.0f, 0.0f, 0.0f)},
 		{{ -offset, -offset, depthValue },		XMFLOAT3(0.0f, 1.0f, 0.0f)},
 		{{ offset, -offset, depthValue },		XMFLOAT3(0.0f, 0.0f, 1.0f)},
-
-		//{{std::sqrtf(8.f / 9.f), 0.f, -1.f / 3.f}, {1.f, 0.f, 0.f}},
-		//{{-std::sqrtf(2.f / 9.f), std::sqrtf(2.f / 3.f), -1.f / 3.f}, {0.f, 1.f, 0.f}},
-		//{{-std::sqrtf(2.f / 9.f), -std::sqrtf(2.f / 3.f), -1.f / 3.f}, {0.f, 0.f, 1.f}},
-		//{{0.f, 0.f, 1.f}, {1, 0, 1}}
 	};
 
     AllocateUploadBuffer(device, indices, sizeof(indices), &m_indexBuffer.resource);
